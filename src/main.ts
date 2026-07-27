@@ -40,6 +40,7 @@ const preview = document.querySelector<HTMLElement>('#preview')!
 const statusEl = document.querySelector<HTMLElement>('#status')!
 const fileLabel = document.querySelector<HTMLElement>('#file-label')!
 const wordCountEl = document.querySelector<HTMLElement>('#word-count')!
+const zoomLevelEl = document.querySelector<HTMLElement>('#zoom-level')!
 const toastEl = document.querySelector<HTMLElement>('#toast')!
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -112,6 +113,42 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'info')
   toastTimer = setTimeout(() => {
     toastEl.className = 'toast'
   }, 3200)
+}
+
+const CONTENT_ZOOM_MIN = 70
+const CONTENT_ZOOM_MAX = 180
+const CONTENT_ZOOM_STEP = 10
+let contentZoom = 100
+let restoringZoomScroll = false
+let lastWheelZoomAt = 0
+
+function scrollProgress(element: HTMLElement) {
+  const range = element.scrollHeight - element.clientHeight
+  return range > 0 ? element.scrollTop / range : 0
+}
+
+function setContentZoom(nextZoom: number) {
+  const clamped = Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, nextZoom))
+  if (clamped === contentZoom) {
+    const atLimit = clamped === CONTENT_ZOOM_MIN || clamped === CONTENT_ZOOM_MAX
+    showToast(atLimit ? `显示比例已达 ${clamped}%` : `内容显示 ${clamped}%`, 'info')
+    return
+  }
+
+  const editorProgress = scrollProgress(editor)
+  const previewProgress = scrollProgress(preview)
+  contentZoom = clamped
+  restoringZoomScroll = true
+  document.documentElement.style.setProperty('--content-scale', String(contentZoom / 100))
+  zoomLevelEl.textContent = `${contentZoom}%`
+  zoomLevelEl.setAttribute('aria-label', `内容显示比例 ${contentZoom}%`)
+
+  requestAnimationFrame(() => {
+    editor.scrollTop = editorProgress * Math.max(0, editor.scrollHeight - editor.clientHeight)
+    preview.scrollTop = previewProgress * Math.max(0, preview.scrollHeight - preview.clientHeight)
+    requestAnimationFrame(() => { restoringZoomScroll = false })
+  })
+  showToast(`内容显示 ${contentZoom}%`, 'info')
 }
 
 function setMarkdown(value: string) {
@@ -420,6 +457,27 @@ editor.addEventListener('keydown', (e) => {
   else if (key === 'i') { e.preventDefault(); wrapSelection('*') }
 })
 
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+  const zoomIn = e.key === '+' || e.key === '=' || e.code === 'NumpadAdd'
+  const zoomOut = e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract'
+  const zoomReset = e.key === '0' || e.code === 'Numpad0'
+  if (!zoomIn && !zoomOut && !zoomReset) return
+  e.preventDefault()
+  if (zoomReset) setContentZoom(100)
+  else setContentZoom(contentZoom + (zoomIn ? CONTENT_ZOOM_STEP : -CONTENT_ZOOM_STEP))
+}, true)
+
+window.addEventListener('wheel', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return
+  e.preventDefault()
+  if (e.deltaY === 0) return
+  const now = performance.now()
+  if (now - lastWheelZoomAt < 80) return
+  lastWheelZoomAt = now
+  setContentZoom(contentZoom + (e.deltaY < 0 ? CONTENT_ZOOM_STEP : -CONTENT_ZOOM_STEP))
+}, { passive: false })
+
 // ---------- 设置菜单：文件关联 / 设为默认 ----------
 
 const settingsBtn = document.querySelector<HTMLElement>('#settings-btn')!
@@ -517,6 +575,7 @@ let scrollSyncSource: HTMLElement | null = null
 let scrollSyncFrame: number | null = null
 
 function syncScroll(source: HTMLElement, target: HTMLElement) {
+  if (restoringZoomScroll) return
   if (scrollSyncSource && scrollSyncSource !== source) return
   const sourceRange = source.scrollHeight - source.clientHeight
   const targetRange = target.scrollHeight - target.clientHeight

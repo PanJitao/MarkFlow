@@ -1,6 +1,6 @@
 [package]
 name = "exchangemd"
-version = "0.3.2"
+version = "0.3.3"
 description = "ExchangeMD 文档转换工作台"
 authors = ["ExchangeMD"]
 edition = "2021"

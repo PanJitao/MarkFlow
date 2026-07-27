@@ -19,15 +19,11 @@ jobs:
       fail-fast: false   # 单个平台失败不影响其它平台继续构建
       matrix:
         include:
-          # Windows
+          # Windows x64
           - { runner: windows-latest,  target: x86_64-pc-windows-msvc,  label: windows-x64 }
-          - { runner: windows-latest,  target: aarch64-pc-windows-msvc, label: windows-arm64 }
           # macOS（Apple Silicon + Intel）
           - { runner: macos-latest,    target: aarch64-apple-darwin,    label: macos-arm64 }
           - { runner: macos-latest,    target: x86_64-apple-darwin,     label: macos-x64 }
-          # Linux
-          - { runner: ubuntu-22.04,    target: x86_64-unknown-linux-gnu,  label: linux-x64 }
-          - { runner: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, label: linux-arm64 }
 
     steps:
       - uses: actions/checkout@v4
@@ -42,14 +38,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: 安装 Linux 系统依赖
-        if: startsWith(matrix.runner, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev
-
       - name: 安装前端依赖
         run: npm install
 
@@ -60,7 +48,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseBody: 'ExchangeMD ${{ github.ref_name }} —— Windows (x64/arm64)、macOS (x64/arm64)、Linux (x64/arm64) 全平台构建。详见 README。'
+          releaseBody: 'ExchangeMD ${{ github.ref_name }} —— Windows x64、macOS Apple Silicon 与 macOS Intel 构建。新增编辑区隐藏、预览复制增强和双向同步滚动。'
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}

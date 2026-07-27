@@ -75,10 +75,9 @@ Tauri v2 + 原生 TypeScript · 单文件 exe 仅 **~3 MB** · 免安装 · **�
 
 | 平台 | 下载文件 |
 | --- | --- |
-| Windows x64 / arm64 | `ExchangeMD_*_x64.exe` / `*_aarch64.exe`（NSIS 安装包）或 `*.msi` |
+| Windows x64 | `ExchangeMD_*_x64-setup.exe`（NSIS 安装包）或 `*_x64_en-US.msi` |
 | macOS（Apple Silicon） | `ExchangeMD_*_aarch64.dmg` |
 | macOS（Intel） | `ExchangeMD_*_x64.dmg` |
-| Linux | `*.deb` / `*.AppImage` / `*.rpm` |
 
 > 各平台包由 GitHub Actions 自动构建并发布，**完全离线、免安装可绿色运行**。也可按下方 [自行构建](#-自行构建) 在本机打包。
 

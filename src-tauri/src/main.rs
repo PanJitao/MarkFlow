@@ -2,12 +2,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::fs;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 use tauri::ipc::Response;
 
 const PROG_ID: &str = "ExchangeMD.md";
 const APP_NAME: &str = "ExchangeMD.exe";
 const MD_EXTS: &[&str] = &[".md", ".markdown", ".mdown"];
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 // ---------- 跨平台「用系统默认程序打开」 ----------
 
@@ -189,6 +193,7 @@ fn register_md_handler_windows() -> Result<String, String> {
 #[cfg(windows)]
 fn reg_add(args: &[&str]) -> Result<(), String> {
     let status = Command::new("reg")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(args)
         .output()
         .map_err(|e| format!("调用 reg.exe 失败：{e}"))?;

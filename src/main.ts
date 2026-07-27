@@ -117,16 +117,33 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'info')
 function setMarkdown(value: string) {
   markdown = value
   editor.value = value
-  preview.innerHTML = renderMarkdown(value)
+  renderPreview(value)
   updateCount()
   schedulePersist()
 }
 
 function renderOnly() {
-  preview.innerHTML = renderMarkdown(editor.value)
+  renderPreview(editor.value)
   markdown = editor.value
   updateCount()
   schedulePersist()
+}
+
+function renderPreview(value: string) {
+  preview.innerHTML = renderMarkdown(value)
+  preview.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
+    if (!pre.querySelector('code')) return
+    const wrapper = document.createElement('div')
+    const button = document.createElement('button')
+    wrapper.className = 'code-block'
+    button.type = 'button'
+    button.className = 'code-copy-btn'
+    button.textContent = '复制'
+    button.title = '复制代码'
+    button.setAttribute('aria-label', '复制代码')
+    pre.before(wrapper)
+    wrapper.append(pre, button)
+  })
 }
 
 // ---------- 工具栏：对选区插入 Markdown 标记 ----------
@@ -466,11 +483,70 @@ document.querySelector<HTMLElement>('#copy-btn')!.addEventListener('click', asyn
   }
 })
 
+preview.addEventListener('click', async (e) => {
+  const target = e.target
+  if (!(target instanceof Element)) return
+  const button = target.closest<HTMLButtonElement>('.code-copy-btn')
+  if (!button || !preview.contains(button)) return
+  const code = button.closest('.code-block')?.querySelector('code')
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code.textContent || '')
+    button.textContent = '已复制'
+    showToast('已复制代码', 'success')
+    setTimeout(() => { button.textContent = '复制' }, 1600)
+  } catch (err) {
+    showToast(`复制失败：${errMsg(err)}`, 'error')
+  }
+})
+
+preview.addEventListener('dblclick', (e) => {
+  const target = e.target
+  if (!(target instanceof Element)) return
+  const cell = target.closest<HTMLTableCellElement>('th, td')
+  if (!cell || !preview.contains(cell)) return
+  const selection = window.getSelection()
+  if (!selection) return
+  const range = document.createRange()
+  range.selectNodeContents(cell)
+  selection.removeAllRanges()
+  selection.addRange(range)
+})
+
+let scrollSyncSource: HTMLElement | null = null
+let scrollSyncFrame: number | null = null
+
+function syncScroll(source: HTMLElement, target: HTMLElement) {
+  if (scrollSyncSource && scrollSyncSource !== source) return
+  const sourceRange = source.scrollHeight - source.clientHeight
+  const targetRange = target.scrollHeight - target.clientHeight
+  scrollSyncSource = source
+  target.scrollTop = sourceRange > 0 ? (source.scrollTop / sourceRange) * targetRange : 0
+  if (scrollSyncFrame !== null) cancelAnimationFrame(scrollSyncFrame)
+  scrollSyncFrame = requestAnimationFrame(() => {
+    scrollSyncSource = null
+    scrollSyncFrame = null
+  })
+}
+
+editor.addEventListener('scroll', () => syncScroll(editor, preview))
+preview.addEventListener('scroll', () => syncScroll(preview, editor))
+
 // ---------- 可拖拽分栏（编辑器 / 预览宽度） ----------
 
 const splitter = document.querySelector<HTMLElement>('#splitter')!
 const workspace = document.querySelector<HTMLElement>('#workspace')!
+const editorToggleBtn = document.querySelector<HTMLButtonElement>('#editor-toggle-btn')!
+const editorToggleLabel = document.querySelector<HTMLElement>('#editor-toggle-label')!
 const SPLIT_KEY = 'exchangemd:split'
+
+editorToggleBtn.addEventListener('click', () => {
+  const hidden = !workspace.classList.contains('editor-hidden')
+  workspace.classList.toggle('editor-hidden', hidden)
+  editorToggleBtn.setAttribute('aria-expanded', String(!hidden))
+  editorToggleBtn.title = hidden ? '展开编辑区' : '隐藏编辑区'
+  editorToggleLabel.textContent = hidden ? '展开编辑区' : '隐藏编辑区'
+})
 
 function applySplit(pct: number): number {
   const clamped = Math.min(80, Math.max(20, pct))

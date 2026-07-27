@@ -48,7 +48,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseBody: 'ExchangeMD ${{ github.ref_name }} —— Windows x64、macOS Apple Silicon 与 macOS Intel 构建。新增编辑区隐藏、预览复制增强和双向同步滚动。'
+          releaseBody: 'ExchangeMD ${{ github.ref_name }} —— Windows x64、macOS Apple Silicon 与 macOS Intel 构建。采用全新应用图标，并包含编辑区隐藏、预览复制增强和双向同步滚动。'
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}

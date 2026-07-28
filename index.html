@@ -216,19 +216,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h6M9 3h6v4H9zM6 7h12v14H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
         粘贴
       </button>
-      <div class="editor-context-submenu-wrap">
-        <button type="button" class="context-menu-trigger" data-context-submenu="format" aria-haspopup="menu" aria-expanded="false" role="menuitem">
-          <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M9 5v14M15 5v14M7 19h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>格式化</span>
-          <svg class="context-menu-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <div class="editor-context-submenu" role="menu" aria-label="格式化">
-          <button type="button" data-context-format="h1" role="menuitem">一级标题</button>
-          <button type="button" data-context-format="h2" role="menuitem">二级标题</button>
-          <button type="button" data-context-format="bold" role="menuitem">加粗</button>
-          <button type="button" data-context-format="italic" role="menuitem">斜体</button>
-          <button type="button" data-context-format="list" role="menuitem">无序列表</button>
-        </div>
-      </div>
+      <button type="button" data-context-action="format-json" role="menuitem">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M9 5v14M15 5v14M7 19h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        格式化 JSON
+      </button>
       <button type="button" data-context-action="table" role="menuitem">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3zM3 10h18M3 15h18M9 5v14M15 5v14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
         插入表格

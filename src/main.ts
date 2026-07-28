@@ -657,6 +657,32 @@ async function pasteIntoEditor() {
   showToast('已粘贴', 'success')
 }
 
+function formatJsonCodeBlock() {
+  const { text, start, end } = getSelection()
+  const openingFence = text.lastIndexOf('```', start)
+  const openingLineEnd = openingFence === -1 ? -1 : text.indexOf('\n', openingFence)
+  if (openingLineEnd === -1 || !isJsonLanguage(text.slice(openingFence + 3, openingLineEnd).trim().toLowerCase())) {
+    showToast('请将光标放在 JSON 代码块内', 'info')
+    return
+  }
+
+  const contentStart = openingLineEnd + 1
+  const closingFence = text.indexOf('\n```', contentStart)
+  if (closingFence === -1 || start < contentStart || end > closingFence) {
+    showToast('请将光标放在 JSON 代码块内', 'info')
+    return
+  }
+
+  try {
+    const formatted = JSON.stringify(JSON.parse(text.slice(contentStart, closingFence)), null, 2)
+    const next = text.slice(0, contentStart) + formatted + text.slice(closingFence)
+    applyEdit(next, contentStart, contentStart + formatted.length)
+    showToast('JSON 已格式化', 'success')
+  } catch {
+    showToast('JSON 格式无效，无法格式化', 'error')
+  }
+}
+
 // ---------- 文件操作 ----------
 
 async function openMarkdown() {
@@ -839,17 +865,16 @@ editorContextMenu.addEventListener('click', async (event) => {
   if (!(target instanceof Element)) return
   if (target.closest('[data-context-submenu]')) return
 
-  const format = target.closest<HTMLButtonElement>('[data-context-format]')?.dataset.contextFormat
   const language = target.closest<HTMLButtonElement>('[data-context-code]')?.dataset.contextCode
   const action = target.closest<HTMLButtonElement>('[data-context-action]')?.dataset.contextAction
-  if (!format && !language && !action) return
+  if (!language && !action) return
 
   restoreContextSelection()
   try {
-    if (format) handleToolbar(format)
-    else if (language) insertCodeBlock(language)
+    if (language) insertCodeBlock(language)
     else if (action === 'copy') await copyEditorSelection()
     else if (action === 'paste') await pasteIntoEditor()
+    else if (action === 'format-json') formatJsonCodeBlock()
     else if (action === 'table' || action === 'quote') handleToolbar(action)
   } catch (err) {
     showToast(`操作失败：${errMsg(err)}`, 'error')

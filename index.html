@@ -7,6 +7,11 @@
     <title>ExchangeMD 文档转换工作台</title>
   </head>
   <body>
+    <div id="custom-background" class="custom-background" aria-hidden="true">
+      <img id="background-image" alt="" />
+      <video id="background-video" muted loop autoplay playsinline></video>
+    </div>
+
     <div id="app">
       <header class="topbar">
         <div class="brand">
@@ -42,11 +47,16 @@
         </nav>
 
         <div class="settings-wrap">
-          <button id="settings-btn" class="settings-btn" title="系统设置" aria-haspopup="menu" aria-expanded="false">
+          <button id="settings-btn" class="settings-btn" title="设置" aria-haspopup="menu" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 4a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 3 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1c.6.5 1.3.9 2 1.2l.4 2.5h4l.4-2.5c.7-.3 1.4-.7 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" fill="currentColor"/></svg>
             设置
           </button>
           <div id="settings-menu" class="settings-menu" role="menu" aria-label="系统设置">
+            <button id="appearance-settings-btn" role="menuitem">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.4a1.6 1.6 0 0 0 0-3.2h-1a1.4 1.4 0 0 1 0-2.8H14a7 7 0 0 0 0-14h-2zm-4 7.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4-2a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4 2a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" fill="currentColor"/></svg>
+              外观设置
+            </button>
+            <div class="menu-separator" role="separator"></div>
             <button role="menuitem" data-setting="open-with">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7M17 14l4 3-4 3v-6z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               加入右键「打开方式」
@@ -111,6 +121,91 @@
         </span>
       </footer>
     </div>
+
+    <dialog id="appearance-dialog" class="appearance-dialog" aria-labelledby="appearance-title">
+      <form method="dialog">
+        <header class="appearance-header">
+          <h2 id="appearance-title">外观设置</h2>
+          <button class="appearance-close icon-btn" value="close" aria-label="关闭外观设置" title="关闭">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </header>
+
+        <div class="appearance-body">
+          <div class="appearance-media-row">
+            <div class="appearance-media-copy">
+              <span class="appearance-label">背景素材</span>
+              <span id="background-file-name" class="appearance-value" title="未选择背景素材">未选择</span>
+            </div>
+            <div class="appearance-media-actions">
+              <button type="button" id="choose-background-btn">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6l2 2h8v10H4V6zm2 3v7h12v-6h-7l-2-2H6v1z" fill="currentColor"/></svg>
+                选择
+              </button>
+              <button type="button" id="clear-background-btn" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                清除
+              </button>
+            </div>
+            <input id="background-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm" hidden />
+          </div>
+
+          <label class="appearance-control" for="background-color-input">
+            <span class="appearance-label">背景底色</span>
+            <input id="background-color-input" class="color-swatch" type="color" value="#efe4d6" />
+          </label>
+
+          <label class="appearance-control appearance-range" for="background-opacity-input">
+            <span class="appearance-label">背景不透明度</span>
+            <span class="range-wrap">
+              <input id="background-opacity-input" type="range" min="0" max="100" step="5" value="100" />
+              <output id="background-opacity-value" for="background-opacity-input">100%</output>
+            </span>
+          </label>
+
+          <label class="appearance-control appearance-range" for="panel-opacity-input">
+            <span class="appearance-label">面板与按钮不透明度</span>
+            <span class="range-wrap">
+              <input id="panel-opacity-input" type="range" min="5" max="100" step="1" value="94" />
+              <output id="panel-opacity-value" for="panel-opacity-input">94%</output>
+            </span>
+          </label>
+
+          <div class="appearance-control">
+            <span id="panel-blur-label" class="appearance-label">面板背景模糊</span>
+            <button
+              type="button"
+              id="panel-blur-toggle"
+              class="appearance-switch"
+              role="switch"
+              aria-checked="true"
+              aria-labelledby="panel-blur-label panel-blur-value"
+            >
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span id="panel-blur-value" class="switch-value">开启</span>
+            </button>
+          </div>
+
+          <label class="appearance-control" for="editor-color-input">
+            <span class="appearance-label">编辑器字体</span>
+            <input id="editor-color-input" class="color-swatch" type="color" value="#1f1b15" />
+          </label>
+
+          <label class="appearance-control" for="preview-color-input">
+            <span class="appearance-label">预览字体</span>
+            <input id="preview-color-input" class="color-swatch" type="color" value="#282016" />
+          </label>
+        </div>
+
+        <footer class="appearance-footer">
+          <button type="button" id="reset-appearance-btn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            恢复默认
+          </button>
+          <button class="primary" value="done">完成</button>
+        </footer>
+      </form>
+    </dialog>
 
     <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
 

@@ -3,6 +3,16 @@ import './style.css'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
 import { docxToMarkdown, xlsxToMarkdown, markdownToDocxBlob } from './lib/convert'
 import {
+  clearBackgroundAsset,
+  DEFAULT_APPEARANCE,
+  loadAppearanceSettings,
+  loadBackgroundAsset,
+  saveAppearanceSettings,
+  saveBackgroundAsset,
+  type AppearanceSettings,
+  type StoredBackgroundAsset,
+} from './lib/appearance'
+import {
   pickOpenFile,
   pickSavePath,
   writeTextFile,
@@ -42,7 +52,28 @@ const fileLabel = document.querySelector<HTMLElement>('#file-label')!
 const wordCountEl = document.querySelector<HTMLElement>('#word-count')!
 const zoomLevelEl = document.querySelector<HTMLElement>('#zoom-level')!
 const toastEl = document.querySelector<HTMLElement>('#toast')!
+const customBackground = document.querySelector<HTMLElement>('#custom-background')!
+const backgroundImage = document.querySelector<HTMLImageElement>('#background-image')!
+const backgroundVideo = document.querySelector<HTMLVideoElement>('#background-video')!
+const appearanceDialog = document.querySelector<HTMLDialogElement>('#appearance-dialog')!
+const appearanceSettingsBtn = document.querySelector<HTMLButtonElement>('#appearance-settings-btn')!
+const chooseBackgroundBtn = document.querySelector<HTMLButtonElement>('#choose-background-btn')!
+const clearBackgroundBtn = document.querySelector<HTMLButtonElement>('#clear-background-btn')!
+const backgroundFileInput = document.querySelector<HTMLInputElement>('#background-file-input')!
+const backgroundFileName = document.querySelector<HTMLElement>('#background-file-name')!
+const backgroundColorInput = document.querySelector<HTMLInputElement>('#background-color-input')!
+const backgroundOpacityInput = document.querySelector<HTMLInputElement>('#background-opacity-input')!
+const backgroundOpacityValue = document.querySelector<HTMLOutputElement>('#background-opacity-value')!
+const panelOpacityInput = document.querySelector<HTMLInputElement>('#panel-opacity-input')!
+const panelOpacityValue = document.querySelector<HTMLOutputElement>('#panel-opacity-value')!
+const panelBlurToggle = document.querySelector<HTMLButtonElement>('#panel-blur-toggle')!
+const panelBlurValue = document.querySelector<HTMLElement>('#panel-blur-value')!
+const editorColorInput = document.querySelector<HTMLInputElement>('#editor-color-input')!
+const previewColorInput = document.querySelector<HTMLInputElement>('#preview-color-input')!
+const resetAppearanceBtn = document.querySelector<HTMLButtonElement>('#reset-appearance-btn')!
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+let appearanceSettings = loadAppearanceSettings()
+let backgroundObjectUrl: string | null = null
 
 let markdown = SAMPLE
 let currentFile: string | null = null
@@ -113,6 +144,111 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'info')
   toastTimer = setTimeout(() => {
     toastEl.className = 'toast'
   }, 3200)
+}
+
+// ---------- 外观设置 ----------
+
+const MAX_BACKGROUND_BYTES = 100 * 1024 * 1024
+
+function applyAppearance(settings: AppearanceSettings) {
+  const root = document.documentElement
+  const panelOpacity = settings.panelOpacity / 100
+  root.style.setProperty('--bg', settings.backgroundColor)
+  root.style.setProperty('--background-opacity', String(settings.backgroundOpacity / 100))
+  root.style.setProperty('--panel-opacity', String(panelOpacity))
+  root.style.setProperty('--panel-highlight-opacity', String(panelOpacity * 0.28))
+  root.style.setProperty('--panel-sheen-opacity', String(panelOpacity * 0.36))
+  root.style.setProperty('--panel-reflection-opacity', String(panelOpacity * 0.19))
+  root.style.setProperty('--panel-soft-opacity', String(panelOpacity * 0.06))
+  root.style.setProperty('--panel-header-opacity', String(panelOpacity * 0.4))
+  root.style.setProperty('--content-highlight-opacity', String(panelOpacity * 0.21))
+  root.style.setProperty('--content-reflection-opacity', String(panelOpacity * 0.13))
+  root.style.setProperty('--content-soft-opacity', String(panelOpacity * 0.04))
+  root.style.setProperty('--content-surface-opacity', String(panelOpacity * 0.17))
+  root.style.setProperty('--content-accent-opacity', String(panelOpacity * 0.87))
+  root.style.setProperty('--glass-button-opacity', String(0.08 + panelOpacity * 0.3))
+  root.style.setProperty('--glass-button-hover-opacity', String(0.18 + panelOpacity * 0.34))
+  root.style.setProperty('--glass-highlight-opacity', String(0.08 + panelOpacity * 0.2))
+  root.style.setProperty('--glass-primary-opacity', String(0.18 + panelOpacity * 0.4))
+  root.style.setProperty('--glass-primary-hover-opacity', String(0.24 + panelOpacity * 0.46))
+  root.style.setProperty('--panel-blur', settings.panelBlurEnabled ? '18px' : '0px')
+  root.style.setProperty('--panel-header-blur', settings.panelBlurEnabled ? '12px' : '0px')
+  root.style.setProperty('--editor-text', settings.editorColor)
+  root.style.setProperty('--preview-text', settings.previewColor)
+
+  backgroundColorInput.value = settings.backgroundColor
+  backgroundOpacityInput.value = String(settings.backgroundOpacity)
+  backgroundOpacityValue.value = `${settings.backgroundOpacity}%`
+  panelOpacityInput.value = String(settings.panelOpacity)
+  panelOpacityValue.value = `${settings.panelOpacity}%`
+  panelBlurToggle.setAttribute('aria-checked', String(settings.panelBlurEnabled))
+  panelBlurValue.textContent = settings.panelBlurEnabled ? '开启' : '关闭'
+  editorColorInput.value = settings.editorColor
+  previewColorInput.value = settings.previewColor
+
+  if (settings.backgroundOpacity === 0) backgroundVideo.pause()
+  else if (customBackground.classList.contains('has-video') && !document.hidden) {
+    void backgroundVideo.play().catch(() => undefined)
+  }
+}
+
+function updateAppearance(patch: Partial<AppearanceSettings>) {
+  appearanceSettings = { ...appearanceSettings, ...patch }
+  applyAppearance(appearanceSettings)
+  try {
+    saveAppearanceSettings(appearanceSettings)
+  } catch {
+    // 设置体积很小；存储不可用时仍保留当前会话效果。
+  }
+}
+
+function backgroundKind(asset: Pick<StoredBackgroundAsset, 'name' | 'type'>): 'image' | 'video' | null {
+  const name = asset.name.toLowerCase()
+  if (asset.type.startsWith('video/') || /\.(mp4|webm)$/.test(name)) return 'video'
+  if (asset.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/.test(name)) return 'image'
+  return null
+}
+
+function showBackgroundAsset(asset: StoredBackgroundAsset | null) {
+  if (backgroundObjectUrl) URL.revokeObjectURL(backgroundObjectUrl)
+  backgroundObjectUrl = null
+  backgroundImage.removeAttribute('src')
+  backgroundVideo.pause()
+  backgroundVideo.removeAttribute('src')
+  backgroundVideo.load()
+  customBackground.classList.remove('has-image', 'has-video')
+
+  if (!asset) {
+    backgroundFileName.textContent = '未选择'
+    backgroundFileName.title = '未选择背景素材'
+    clearBackgroundBtn.disabled = true
+    return
+  }
+
+  const kind = backgroundKind(asset)
+  if (!kind) return
+  backgroundObjectUrl = URL.createObjectURL(asset.blob)
+  if (kind === 'video') {
+    backgroundVideo.src = backgroundObjectUrl
+    customBackground.classList.add('has-video')
+    if (appearanceSettings.backgroundOpacity > 0 && !document.hidden) {
+      void backgroundVideo.play().catch(() => undefined)
+    }
+  } else {
+    backgroundImage.src = backgroundObjectUrl
+    customBackground.classList.add('has-image')
+  }
+  backgroundFileName.textContent = asset.name
+  backgroundFileName.title = asset.name
+  clearBackgroundBtn.disabled = false
+}
+
+async function restoreBackground() {
+  try {
+    showBackgroundAsset(await loadBackgroundAsset())
+  } catch (err) {
+    showToast(`恢复背景失败：${errMsg(err)}`, 'error')
+  }
 }
 
 const CONTENT_ZOOM_MIN = 70
@@ -495,6 +631,93 @@ settingsBtn.addEventListener('click', (e) => {
   e.stopPropagation()
   toggleSettingsMenu(!isMenuOpen())
 })
+
+appearanceSettingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation()
+  toggleSettingsMenu(false)
+  if (!appearanceDialog.open) appearanceDialog.showModal()
+})
+
+appearanceDialog.addEventListener('click', (e) => {
+  if (e.target === appearanceDialog) appearanceDialog.close()
+})
+
+appearanceDialog.addEventListener('close', () => appearanceSettingsBtn.focus())
+
+backgroundColorInput.addEventListener('input', () => {
+  updateAppearance({ backgroundColor: backgroundColorInput.value })
+})
+backgroundOpacityInput.addEventListener('input', () => {
+  updateAppearance({ backgroundOpacity: Number(backgroundOpacityInput.value) })
+})
+panelOpacityInput.addEventListener('input', () => {
+  updateAppearance({ panelOpacity: Number(panelOpacityInput.value) })
+})
+panelBlurToggle.addEventListener('click', () => {
+  updateAppearance({ panelBlurEnabled: !appearanceSettings.panelBlurEnabled })
+})
+editorColorInput.addEventListener('input', () => {
+  updateAppearance({ editorColor: editorColorInput.value })
+})
+previewColorInput.addEventListener('input', () => {
+  updateAppearance({ previewColor: previewColorInput.value })
+})
+
+chooseBackgroundBtn.addEventListener('click', () => backgroundFileInput.click())
+backgroundFileInput.addEventListener('change', async () => {
+  const file = backgroundFileInput.files?.[0]
+  backgroundFileInput.value = ''
+  if (!file) return
+  const kind = backgroundKind(file)
+  if (!kind) {
+    showToast('请选择 PNG、JPG、WebP、GIF、MP4 或 WebM 文件', 'error')
+    return
+  }
+  if (file.size > MAX_BACKGROUND_BYTES) {
+    showToast('背景文件不能超过 100 MB', 'error')
+    return
+  }
+
+  const asset: StoredBackgroundAsset = { blob: file, name: file.name, type: file.type }
+  showBackgroundAsset(asset)
+  if (appearanceSettings.backgroundOpacity === 0) updateAppearance({ backgroundOpacity: 100 })
+  try {
+    await saveBackgroundAsset(asset)
+    showToast(kind === 'video' || /\.gif$/i.test(file.name) ? '动态背景已应用' : '背景已应用', 'success')
+  } catch (err) {
+    showToast(`背景已应用，但保存失败：${errMsg(err)}`, 'error')
+  }
+})
+
+clearBackgroundBtn.addEventListener('click', async () => {
+  try {
+    await clearBackgroundAsset()
+    showBackgroundAsset(null)
+    showToast('背景素材已清除', 'success')
+  } catch (err) {
+    showToast(`清除背景失败：${errMsg(err)}`, 'error')
+  }
+})
+
+resetAppearanceBtn.addEventListener('click', async () => {
+  appearanceSettings = { ...DEFAULT_APPEARANCE }
+  applyAppearance(appearanceSettings)
+  try { saveAppearanceSettings(appearanceSettings) } catch { /* 保留当前会话效果 */ }
+  showBackgroundAsset(null)
+  try {
+    await clearBackgroundAsset()
+    showToast('外观已恢复默认', 'success')
+  } catch (err) {
+    showToast(`外观已恢复，背景存储清理失败：${errMsg(err)}`, 'error')
+  }
+})
+
+document.addEventListener('visibilitychange', () => {
+  if (!customBackground.classList.contains('has-video')) return
+  if (document.hidden || appearanceSettings.backgroundOpacity === 0) backgroundVideo.pause()
+  else void backgroundVideo.play().catch(() => undefined)
+})
+
 // 点击菜单外部收起
 document.addEventListener('click', () => toggleSettingsMenu(false))
 // ESC 收起
@@ -663,4 +886,6 @@ async function init() {
   setStatus('就绪')
 }
 
+applyAppearance(appearanceSettings)
+void restoreBackground()
 init()

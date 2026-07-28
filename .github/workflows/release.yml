@@ -1,18 +1,41 @@
 name: release
 
-# 打 Version_* / v* 标签时触发，也可手动运行
+# 推送 v0.3.5 这类语义化标签时触发，也可手动指定同格式标签。
 on:
   push:
     tags:
-      - 'Version_*'
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, for example v0.3.5'
+        required: true
+        type: string
 
 permissions:
   contents: write   # 创建 / 上传 Release 资源所需
 
 jobs:
+  release_metadata:
+    name: validate release version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must use vX.Y.Z, for example v0.3.5."
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
   publish:
+    needs: release_metadata
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -27,6 +50,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_metadata.outputs.tag }}
 
       - name: 安装 Node
         uses: actions/setup-node@v4
@@ -46,9 +71,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: 'ExchangeMD ${{ github.ref_name }} —— Windows x64、macOS Apple Silicon 与 macOS Intel 构建。新增自定义静态/动态背景、背景与面板透明度、编辑/预览字体颜色和独立模糊开关；界面统一为白色玻璃质感，并保留内容缩放、编辑区隐藏、预览复制增强和双向同步滚动。'
+          tagName: ${{ needs.release_metadata.outputs.tag }}
+          releaseName: ${{ needs.release_metadata.outputs.version }}
+          releaseBody: 'ExchangeMD ${{ needs.release_metadata.outputs.version }} - Windows x64, macOS Apple Silicon, and macOS Intel builds.'
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}

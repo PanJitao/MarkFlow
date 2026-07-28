@@ -377,6 +377,25 @@ function codeBlockText(code: HTMLElement) {
   return code.dataset.trailingNewline === 'true' ? `${source}\n` : source
 }
 
+function setCodeCopyButtonState(button: HTMLButtonElement, copied = false) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  path.setAttribute('d', copied
+    ? 'm5 12 4 4L19 6'
+    : 'M8 8h10v12H8zM6 16H5V4h10v2')
+  svg.append(path)
+  button.replaceChildren(svg)
+  button.title = copied ? '已复制' : '复制代码'
+  button.setAttribute('aria-label', copied ? '已复制代码' : '复制代码')
+}
+
 function renderPreview(value: string) {
   preview.innerHTML = renderMarkdown(value)
   preview.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
@@ -388,9 +407,7 @@ function renderPreview(value: string) {
     wrapper.className = 'code-block'
     button.type = 'button'
     button.className = 'code-copy-btn'
-    button.textContent = '复制'
-    button.title = '复制代码'
-    button.setAttribute('aria-label', '复制代码')
+    setCodeCopyButtonState(button)
     pre.before(wrapper)
     wrapper.append(pre, button)
   })
@@ -850,9 +867,9 @@ preview.addEventListener('click', async (e) => {
   if (!code) return
   try {
     await navigator.clipboard.writeText(codeBlockText(code))
-    button.textContent = '已复制'
+    setCodeCopyButtonState(button, true)
     showToast('已复制代码', 'success')
-    setTimeout(() => { button.textContent = '复制' }, 1600)
+    setTimeout(() => { setCodeCopyButtonState(button) }, 1600)
   } catch (err) {
     showToast(`复制失败：${errMsg(err)}`, 'error')
   }

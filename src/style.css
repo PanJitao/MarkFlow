@@ -409,7 +409,7 @@ textarea:focus-visible {
 #preview pre { background: #1f2937; color: #f9fafb; padding: 14px; overflow: auto; border-radius: 8px; }
 #preview code { font-family: 'Cascadia Code', Consolas, monospace; }
 #preview .code-block { position: relative; margin: 1em 0; }
-#preview .code-block pre { margin: 0; padding: 46px 0 10px; }
+#preview .code-block pre { margin: 0; padding: 10px 0; }
 #preview .code-block code { display: block; min-width: max-content; }
 #preview .code-line {
   display: grid;
@@ -434,9 +434,11 @@ textarea:focus-visible {
   position: absolute;
   top: 8px;
   right: 8px;
-  min-width: 58px;
-  min-height: 30px;
-  padding: 0 9px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
   border-color: rgba(255, 255, 255, 0.48);
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.04) 52%, rgba(255, 255, 255, 0.14)),
@@ -446,7 +448,21 @@ textarea:focus-visible {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.24),
     0 5px 14px rgba(8, 12, 20, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  visibility: hidden;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 160ms ease;
   z-index: 1;
+}
+#preview .code-copy-btn svg { width: 16px; height: 16px; }
+#preview .code-block:hover .code-copy-btn,
+#preview .code-block:focus-within .code-copy-btn,
+#preview .code-copy-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
 }
 #preview .code-copy-btn:hover:not(:disabled) {
   background:

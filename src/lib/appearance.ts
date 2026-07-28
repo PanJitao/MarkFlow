@@ -3,6 +3,7 @@ export interface AppearanceSettings {
   backgroundOpacity: number
   panelOpacity: number
   panelBlurEnabled: boolean
+  buttonTextColor: string
   editorColor: string
   previewColor: string
 }
@@ -18,6 +19,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   backgroundOpacity: 100,
   panelOpacity: 94,
   panelBlurEnabled: true,
+  buttonTextColor: '#20262e',
   editorColor: '#1f1b15',
   previewColor: '#282016',
 }
@@ -48,6 +50,7 @@ export function loadAppearanceSettings(): AppearanceSettings {
       panelBlurEnabled: typeof saved.panelBlurEnabled === 'boolean'
         ? saved.panelBlurEnabled
         : DEFAULT_APPEARANCE.panelBlurEnabled,
+      buttonTextColor: isColor(saved.buttonTextColor) ? saved.buttonTextColor : DEFAULT_APPEARANCE.buttonTextColor,
       editorColor: isColor(saved.editorColor) ? saved.editorColor : DEFAULT_APPEARANCE.editorColor,
       previewColor: isColor(saved.previewColor) ? saved.previewColor : DEFAULT_APPEARANCE.previewColor,
     }

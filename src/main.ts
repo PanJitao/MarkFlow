@@ -99,6 +99,7 @@ const panelOpacityInput = document.querySelector<HTMLInputElement>('#panel-opaci
 const panelOpacityValue = document.querySelector<HTMLOutputElement>('#panel-opacity-value')!
 const panelBlurToggle = document.querySelector<HTMLButtonElement>('#panel-blur-toggle')!
 const panelBlurValue = document.querySelector<HTMLElement>('#panel-blur-value')!
+const buttonTextColorInput = document.querySelector<HTMLInputElement>('#button-text-color-input')!
 const editorColorInput = document.querySelector<HTMLInputElement>('#editor-color-input')!
 const previewColorInput = document.querySelector<HTMLInputElement>('#preview-color-input')!
 const resetAppearanceBtn = document.querySelector<HTMLButtonElement>('#reset-appearance-btn')!
@@ -116,6 +117,7 @@ let updateInstalling = false
 let markdown = SAMPLE
 let currentFile: string | null = null
 let busy = false
+let writingPreviewTable = false
 
 const STATE_KEY = 'exchangemd:lastState'
 let persistTimer: ReturnType<typeof setTimeout> | null = null
@@ -278,6 +280,7 @@ function applyAppearance(settings: AppearanceSettings) {
   root.style.setProperty('--glass-primary-hover-opacity', String(0.24 + panelOpacity * 0.46))
   root.style.setProperty('--panel-blur', settings.panelBlurEnabled ? '18px' : '0px')
   root.style.setProperty('--panel-header-blur', settings.panelBlurEnabled ? '12px' : '0px')
+  root.style.setProperty('--button-text', settings.buttonTextColor)
   root.style.setProperty('--editor-text', settings.editorColor)
   root.style.setProperty('--preview-text', settings.previewColor)
 
@@ -288,6 +291,7 @@ function applyAppearance(settings: AppearanceSettings) {
   panelOpacityValue.value = `${settings.panelOpacity}%`
   panelBlurToggle.setAttribute('aria-checked', String(settings.panelBlurEnabled))
   panelBlurValue.textContent = settings.panelBlurEnabled ? '开启' : '关闭'
+  buttonTextColorInput.value = settings.buttonTextColor
   editorColorInput.value = settings.editorColor
   previewColorInput.value = settings.previewColor
 
@@ -549,6 +553,9 @@ function setCodeCopyButtonState(button: HTMLButtonElement, copied = false) {
 
 function renderPreview(value: string) {
   preview.innerHTML = renderMarkdown(value)
+  preview.querySelectorAll<HTMLTableElement>('table').forEach((table, index) => {
+    enhancePreviewTable(table, index)
+  })
   preview.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
     const code = pre.querySelector<HTMLElement>('code')
     if (!code) return
@@ -561,6 +568,186 @@ function renderPreview(value: string) {
     setCodeCopyButtonState(button)
     pre.before(wrapper)
     wrapper.append(pre, button)
+  })
+}
+
+interface MarkdownTableSource {
+  start: number
+  end: number
+  rows: string[][]
+  divider: string[]
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  const content = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  const cells: string[] = []
+  let cell = ''
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index]
+    if (char === '\\' && content[index + 1] === '|') {
+      cell += '|'
+      index += 1
+    } else if (char === '|') {
+      cells.push(cell.trim())
+      cell = ''
+    } else {
+      cell += char
+    }
+  }
+  cells.push(cell.trim())
+  return cells
+}
+
+function isMarkdownTableDivider(cells: string[]) {
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+}
+
+function findMarkdownTables(source: string): MarkdownTableSource[] {
+  const lines = source.split('\n')
+  const tables: MarkdownTableSource[] = []
+  let fenced = false
+  for (let start = 0; start < lines.length - 1; start += 1) {
+    if (/^\s*(`{3,}|~{3,})/.test(lines[start])) {
+      fenced = !fenced
+      continue
+    }
+    if (fenced || !lines[start].includes('|') || !lines[start + 1].includes('|')) continue
+    const header = splitMarkdownTableRow(lines[start])
+    const divider = splitMarkdownTableRow(lines[start + 1])
+    if (header.length < 2 || header.length !== divider.length || !isMarkdownTableDivider(divider)) continue
+
+    const rows = [header]
+    let end = start + 1
+    while (end + 1 < lines.length && lines[end + 1].includes('|')) {
+      const row = splitMarkdownTableRow(lines[end + 1])
+      if (row.length !== header.length) break
+      rows.push(row)
+      end += 1
+    }
+    tables.push({ start, end, rows, divider })
+    start = end
+  }
+  return tables
+}
+
+function tableCellMarkdown(value: string) {
+  return value.trim().replace(/\|/g, '\\|')
+}
+
+function writeMarkdownTable(tableIndex: number, mutate: (rows: string[][], divider: string[]) => void) {
+  if (writingPreviewTable) return
+  writingPreviewTable = true
+  const lines = editor.value.split('\n')
+  const table = findMarkdownTables(editor.value)[tableIndex]
+  if (!table) {
+    writingPreviewTable = false
+    return
+  }
+  try {
+    const rows = table.rows.map((row) => [...row])
+    const divider = [...table.divider]
+    mutate(rows, divider)
+    const width = Math.max(...rows.map((row) => row.length), divider.length)
+    rows.forEach((row) => { while (row.length < width) row.push('') })
+    while (divider.length < width) divider.push('---')
+    const format = (row: string[]) => `| ${row.map(tableCellMarkdown).join(' | ')} |`
+    const nextTable = [format(rows[0]), format(divider), ...rows.slice(1).map(format)]
+    lines.splice(table.start, table.end - table.start + 1, ...nextTable)
+    const next = lines.join('\n')
+    editor.value = next
+    markdown = next
+    renderPreview(next)
+    updateCount()
+    schedulePersist()
+  } finally {
+    writingPreviewTable = false
+  }
+}
+
+function createTableControlButton(label: string, iconPath: string) {
+  const button = document.createElement('button')
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  button.type = 'button'
+  button.className = 'table-edge-btn'
+  button.title = label
+  button.setAttribute('aria-label', label)
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('aria-hidden', 'true')
+  path.setAttribute('d', iconPath)
+  path.setAttribute('fill', 'none')
+  path.setAttribute('stroke', 'currentColor')
+  path.setAttribute('stroke-width', '2')
+  path.setAttribute('stroke-linecap', 'round')
+  svg.append(path)
+  button.append(svg)
+  return button
+}
+
+function enhancePreviewTable(table: HTMLTableElement, tableIndex: number) {
+  const wrapper = document.createElement('div')
+  wrapper.className = 'preview-table-editor'
+  table.before(wrapper)
+  wrapper.append(table)
+
+  table.querySelectorAll<HTMLTableCellElement>('th, td').forEach((cell) => {
+    const row = (cell.closest('tr') as HTMLTableRowElement | null)?.rowIndex ?? 0
+    const column = cell.cellIndex
+    cell.contentEditable = 'plaintext-only'
+    cell.spellcheck = false
+    cell.addEventListener('focus', () => { cell.dataset.beforeEdit = cell.textContent || '' })
+    cell.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        cell.blur()
+      }
+      if (event.key === 'Escape') {
+        cell.textContent = cell.dataset.beforeEdit || ''
+        cell.blur()
+      }
+    })
+    cell.addEventListener('blur', () => {
+      const beforeEdit = cell.dataset.beforeEdit
+      delete cell.dataset.beforeEdit
+      if (beforeEdit === undefined) return
+      const value = (cell.textContent || '').replace(/\s+/g, ' ').trim()
+      if (value !== beforeEdit) {
+        writeMarkdownTable(tableIndex, (rows) => { rows[row][column] = value })
+      }
+    })
+  })
+
+  const rowEdge = document.createElement('div')
+  const columnEdge = document.createElement('div')
+  const addRow = createTableControlButton('在表格末尾新增一行', 'M12 5v14M5 12h14')
+  const removeRow = createTableControlButton('删除表格最后一行', 'M5 12h14')
+  const addColumn = createTableControlButton('在表格右侧新增一列', 'M12 5v14M5 12h14')
+  const removeColumn = createTableControlButton('删除表格最后一列', 'M5 12h14')
+  rowEdge.className = 'table-edge table-row-edge'
+  columnEdge.className = 'table-edge table-column-edge'
+  removeRow.disabled = (table.tBodies[0]?.rows.length ?? 0) === 0
+  removeColumn.disabled = (table.rows[0]?.cells.length ?? 0) <= 2
+  rowEdge.append(addRow, removeRow)
+  columnEdge.append(addColumn, removeColumn)
+  wrapper.append(rowEdge, columnEdge)
+
+  addRow.addEventListener('click', () => {
+    writeMarkdownTable(tableIndex, (rows) => rows.push(Array(rows[0].length).fill('')))
+  })
+  removeRow.addEventListener('click', () => {
+    writeMarkdownTable(tableIndex, (rows) => { rows.pop() })
+  })
+  addColumn.addEventListener('click', () => {
+    writeMarkdownTable(tableIndex, (rows, divider) => {
+      rows.forEach((row, index) => row.push(index === 0 ? '列名' : ''))
+      divider.push('---')
+    })
+  })
+  removeColumn.addEventListener('click', () => {
+    writeMarkdownTable(tableIndex, (rows, divider) => {
+      rows.forEach((row) => row.pop())
+      divider.pop()
+    })
   })
 }
 
@@ -748,6 +935,21 @@ async function pasteIntoEditor() {
   showToast('已粘贴', 'success')
 }
 
+function describeJsonParseError(error: unknown, source: string) {
+  const message = errMsg(error)
+  const match = message.match(/\bposition (\d+)\b/i)
+  if (!match) return `JSON 格式错误：${message}`
+
+  const position = Math.min(Number(match[1]), source.length)
+  const beforeError = source.slice(0, position)
+  const line = beforeError.split('\n').length
+  const column = position - beforeError.lastIndexOf('\n')
+  const reason = message
+    .replace(/\s*at position \d+(?:\s*\(line \d+ column \d+\))?/i, '')
+    .trim()
+  return `JSON 格式错误：第 ${line} 行，第 ${column} 列，${reason}`
+}
+
 function formatJsonCodeBlock() {
   const { text, start, end } = getSelection()
   const openingFence = text.lastIndexOf('```', start)
@@ -769,8 +971,8 @@ function formatJsonCodeBlock() {
     const next = text.slice(0, contentStart) + formatted + text.slice(closingFence)
     applyEdit(next, contentStart, contentStart + formatted.length)
     showToast('JSON 已格式化', 'success')
-  } catch {
-    showToast('JSON 格式无效，无法格式化', 'error')
+  } catch (error) {
+    showToast(describeJsonParseError(error, text.slice(contentStart, closingFence)), 'error')
   }
 }
 
@@ -1085,6 +1287,9 @@ panelOpacityInput.addEventListener('input', () => {
 })
 panelBlurToggle.addEventListener('click', () => {
   updateAppearance({ panelBlurEnabled: !appearanceSettings.panelBlurEnabled })
+})
+buttonTextColorInput.addEventListener('input', () => {
+  updateAppearance({ buttonTextColor: buttonTextColorInput.value })
 })
 editorColorInput.addEventListener('input', () => {
   updateAppearance({ editorColor: editorColorInput.value })

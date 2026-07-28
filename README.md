@@ -1,188 +1,204 @@
 <div align="center">
 
+<img src="app-icon.png" width="96" alt="ExchangeMD logo" />
+
 # ExchangeMD
 
-### 轻量级桌面文档转换工作台 · Markdown / Word / Excel / HTML 互转
+本地优先的 Markdown 文档转换与编辑工作台
 
-Tauri v2 + 原生 TypeScript · 单文件 exe 仅 **~3 MB** · 免安装 · **完全离线** · 全中文界面
+Markdown、Word、Excel、HTML 的转换、编辑和预览都在一个桌面应用中完成。
 
-![license](https://img.shields.io/badge/license-MIT-blue.svg) ![platform](https://img.shields.io/badge/platform-Windows-0078D4.svg) ![size](https://img.shields.io/badge/size-~3MB-22c55e.svg) ![offline](https://img.shields.io/badge/完全离线-✓-9b59b6.svg)
+[![Version](https://img.shields.io/badge/version-0.3.4-1f7a8c.svg)](https://github.com/PanJitao/word-to-markdown/releases/tag/Version_6)
+![Tauri](https://img.shields.io/badge/desktop-Tauri%20v2-24c8db.svg)
+![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3a6ea5.svg)
+[![License](https://img.shields.io/badge/license-MIT-4c956c.svg)](LICENSE)
 
-[功能](#-核心功能) · [截图](#-截图) · [下载](#-下载与使用) · [自行构建](#-自行构建) · [快捷键](#-快捷键)
+[下载 Version_6](https://github.com/PanJitao/word-to-markdown/releases/tag/Version_6) · [核心功能](#核心功能) · [使用方式](#使用方式) · [自行构建](#自行构建)
 
 </div>
 
 ---
 
-## 📌 项目简介
+## 项目简介
 
-**ExchangeMD** 是一个跨格式文档转换的桌面小工具。在一个窗口里就能完成 **Markdown、Word（.docx）、Excel（.xlsx）、HTML** 之间的互相转换，并自带实时预览的 Markdown 编辑器。
+ExchangeMD 是一款面向日常写作、文档整理和格式转换的桌面工具。它提供 Markdown 源码编辑与实时预览，支持将 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word 或独立 HTML。
 
-它用 [Tauri v2](https://tauri.app/)（系统 WebView2）+ 原生 TypeScript 构建，**单文件 exe 仅约 3 MB**，免安装、不捆绑额外运行时。所有文档转换都在前端 JS 本地完成，启动即用、关闭即走。
+当前版本为 `0.3.4`，对应 GitHub Release `Version_6`。文档转换、预览和外观设置均在本机运行，文件不会上传到服务端。
 
----
+## 核心功能
 
-## ✨ 核心功能
+### Markdown 编辑与预览
 
-### 编辑器
-- 左侧 Markdown **源码编辑** + 右侧**实时渲染预览**
-- 工具栏一键插入：标题、加粗、斜体、列表、引用、表格、代码块、链接
-- **可拖拽分隔条**调整编辑器 / 预览的宽度（比例自动记忆）
-- 一键**复制** Markdown 源码、实时**字数统计**
+- 左侧 Markdown 源码编辑，右侧实时渲染预览。
+- 支持隐藏或展开编辑区，预览区可获得完整宽度。
+- 可拖动中间分隔条调整编辑区和预览区比例。
+- 编辑区和预览区上下滚动自动同步，便于边改边核对排版。
+- 工具栏可快速插入标题、加粗、斜体、列表、引用、表格、代码块和链接。
+- 支持复制 Markdown 源码、实时字数统计和上次会话恢复。
 
-### 文档转换（全部本地完成，文件不上传）
+### 预览复制增强
+
+- 预览表格中双击单元格，可直接选中该单元格内容。
+- 每个代码块右上角提供复制按钮。
+- 外部链接在系统默认浏览器中打开，不会替换当前工作区。
+
+### 内容显示缩放
+
+- 支持 `Ctrl/Command + 滚轮` 调整内容大小。
+- 支持 `Ctrl/Command + +` 与 `Ctrl/Command + -` 调整内容大小。
+- 缩放范围限制为 `70% - 180%`，仅影响编辑和预览内容，不缩放整套界面。
+
+### 外观与背景定制
+
+- 支持 PNG、JPG、WebP、GIF、MP4、WebM 作为静态或动态背景素材，单个文件最大 `100 MB`。
+- 支持设置背景底色、背景透明度、面板与按钮透明度。
+- 编辑区和预览区透明度最低可调整到 `5%`。
+- 支持分别设置编辑器和预览区字体颜色。
+- 提供独立的面板背景模糊开关。
+- 按钮、编辑区和预览区统一使用白色半透明玻璃质感，并保留清晰的层级和焦点状态。
+- 外观设置、背景素材和透明度会在本机保存，重启后自动恢复。
+
+### 文档转换
+
+所有转换在本机完成，不上传文档内容。
+
 | 转换方向 | 说明 |
 | --- | --- |
-| **Word → Markdown** | 正确处理标题、列表、表格（含**合并单元格**）、图片标记 |
-| **Excel → Markdown** | 每个工作表转为 Markdown 表格 |
-| **Markdown → Word** | 生成真实 `.docx`，支持标题、有序/无序列表、表格、代码块、分隔线、**可点超链接**、嵌套加粗斜体 |
-| **Markdown → HTML** | 生成带排版的独立 HTML 文档 |
+| Word -> Markdown | 保留标题、列表、表格、合并单元格、图片标记等结构。 |
+| Excel -> Markdown | 将每个工作表转换为 Markdown 表格。 |
+| Markdown -> Word | 生成真实 `.docx`，支持标题、列表、表格、代码块、链接和嵌套文本格式。 |
+| Markdown -> HTML | 导出带基础排版的独立 HTML 文档。 |
 
-### 系统集成
-- **恢复上次状态**：下次打开自动恢复上次的编辑内容与文件名
-- **右键「打开方式」**：一键把 ExchangeMD 加入 `.md` 的右键打开方式列表
-- **设为默认程序**：注册到系统默认应用，双击 `.md` 直接用本程序打开
-- 双击 `.md` / 通过右键打开，都能直接载入该文件
+### 桌面集成
 
-### 安全与体验
-- **完全离线运行**：不联网、无遥测、无数据上报，所有转换在本地完成，文件绝不外传
-- 预览链接**在系统浏览器打开**，绝不接管应用窗口（避免误关导致退出）
-- 预览 HTML 经 DOMPurify 消毒，防 XSS；全局启用 CSP
-- 依赖已修复已知漏洞（SheetJS 升级至官方修复版 0.20.3）
-- 尊重 `prefers-reduced-motion`、键盘焦点环、aria 无障碍标签
+- 自动恢复上次编辑内容和文件名。
+- 可将 ExchangeMD 加入 `.md` 文件右键“打开方式”。
+- 可注册为 Markdown 默认应用，并跳转至 Windows 系统设置确认默认程序。
+- 双击 `.md` 文件或通过右键菜单打开时，文件会直接载入编辑区。
 
----
+## 截图
 
-## 📷 截图
+### 编辑与实时预览
 
-### 主界面：编辑 + 实时预览
-![主界面](docs/screenshots/01-main.png)
+![ExchangeMD 主界面](docs/screenshots/01-main.png)
 
-### 文档转换效果（Word → Markdown，保留标题/列表/表格）
-![转换效果](docs/screenshots/03-conversion.png)
+### Word 转 Markdown
 
-### 可拖拽分栏（拖动中间分隔条调整宽度）
-![可拖拽分栏](docs/screenshots/04-resizable.png)
+![Word 转 Markdown 效果](docs/screenshots/03-conversion.png)
 
-### 系统设置：加入右键打开方式 / 设为默认程序
-![系统设置](docs/screenshots/02-settings.png)
+### 可调节分栏
 
----
+![可拖动分栏](docs/screenshots/04-resizable.png)
 
-## 💾 下载与使用
+## 下载与使用
 
-到本仓库的 **[Releases](../../releases)** 页下载对应平台的成品包：
+前往 [Version_6 Release](https://github.com/PanJitao/word-to-markdown/releases/tag/Version_6) 下载对应平台的安装包。
 
-| 平台 | 下载文件 |
-| --- | --- |
-| Windows x64 | `ExchangeMD_*_x64-setup.exe`（NSIS 安装包）或 `*_x64_en-US.msi` |
-| macOS（Apple Silicon） | `ExchangeMD_*_aarch64.dmg` |
-| macOS（Intel） | `ExchangeMD_*_x64.dmg` |
+| 平台 | 文件 | 直接下载 |
+| --- | --- | --- |
+| Windows x64 | NSIS 安装程序 | [ExchangeMD_0.3.4_x64-setup.exe](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_x64-setup.exe) |
+| Windows x64 | MSI 安装包 | [ExchangeMD_0.3.4_x64_en-US.msi](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_x64_en-US.msi) |
+| macOS Apple Silicon | DMG | [ExchangeMD_0.3.4_aarch64.dmg](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_aarch64.dmg) |
+| macOS Intel | DMG | [ExchangeMD_0.3.4_x64.dmg](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_x64.dmg) |
 
-> 各平台包由 GitHub Actions 自动构建并发布，**完全离线、免安装可绿色运行**。也可按下方 [自行构建](#-自行构建) 在本机打包。
+Windows 10/11 通常已内置 WebView2。少数旧系统如缺少该运行时，可从 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) 安装。
 
-1. 下载后运行（macOS 首次需在「访达」右键 → 打开；Windows 可能提示 SmartScreen，选「仍要运行」）。
-2. 首次使用建议点右上角 **⚙️ 设置**：
-   - 「加入右键打开方式」→ 之后 `.md` 右键就能选 ExchangeMD 打开。
-   - 「设为默认 Markdown 程序」→ 会打开系统设置页，确认即可设为默认。
+首次打开后，可通过右上角“设置 -> 外观设置”配置背景、透明度、字体颜色和模糊效果。
 
-> **运行依赖**：Windows 自带的 **WebView2 运行时**（Win10/Win11 通常已内置；少数老旧系统需从[微软官网](https://developer.microsoft.com/microsoft-edge/webview2/)安装，仅此一项、运行时不再联网）。
+## 使用方式
 
----
+1. 在左侧输入或粘贴 Markdown，右侧即时查看渲染结果。
+2. 需要转换文件时，使用顶部“打开 MD”“Word 转 MD”或“Excel 转 MD”。
+3. 使用“保存 MD”“MD 转 Word”“导出 HTML”保存所需格式。
+4. 使用编辑区右上方的显示切换按钮隐藏或展开编辑区。
+5. 使用右上角“设置 -> 外观设置”调整背景与玻璃面板效果。
 
-## 🛠 自行构建
-
-### 环境要求
-- [Node.js](https://nodejs.org/) ≥ 18
-- [Rust](https://www.rust-lang.org/tools/install)（含 cargo）
-- Windows 10/11（带 WebView2）
-
-### 步骤
-```bash
-# 1. 安装依赖
-npm install
-
-# 2.（可选）重新生成应用图标
-npx @tauri-apps/cli icon ./app-icon.png
-
-# 3. 开发模式（热更新）
-npx @tauri-apps/cli dev
-#   或仅前端调试：npm run dev，浏览器访问 http://127.0.0.1:1420
-
-# 4. 打包单文件 exe
-npx @tauri-apps/cli build
-#   产物：src-tauri/target/release/exchangemd.exe
-
-# 5. 转换逻辑单元测试（不依赖 Tauri）
-node --experimental-strip-types ./scripts/smoke-convert.mjs
-```
-
----
-
-## ⌨️ 快捷键
+## 快捷键
 
 | 快捷键 | 功能 |
 | --- | --- |
-| `Ctrl + B` | 加粗 |
-| `Ctrl + I` | 斜体 |
-| `Tab` | 插入两个空格 / 给选中行加缩进 |
-| `Shift + Tab` | 反缩进 |
-| `Esc` | 关闭设置菜单 |
+| `Ctrl/Command + B` | 加粗 |
+| `Ctrl/Command + I` | 斜体 |
+| `Ctrl/Command + 滚轮` | 放大或缩小内容显示 |
+| `Ctrl/Command + +` | 放大内容显示 |
+| `Ctrl/Command + -` | 缩小内容显示 |
+| `Tab` | 插入两个空格，或为选中行增加缩进 |
+| `Shift + Tab` | 减少缩进 |
+| `Esc` | 关闭设置菜单或对话框 |
 
----
+## 自行构建
 
-## 📂 项目结构
+### 环境要求
 
+- Node.js `20` 或更高版本。
+- Rust stable 工具链和 Cargo。
+- Windows 构建需安装 WebView2 运行时。
+
+### 开发与测试
+
+```bash
+# 安装依赖
+npm install
+
+# 启动 Tauri 开发应用
+npm run tauri -- dev
+
+# 仅启动前端页面，访问 http://127.0.0.1:1420
+npm run dev
+
+# 前端生产构建
+npm run build
+
+# 转换逻辑冒烟测试
+node scripts/smoke-convert.mjs
 ```
-├─ index.html              界面结构（全中文）
-├─ package.json            前端依赖与脚本
-├─ vite.config.ts          Vite 配置（dev 端口 1420）
-├─ app-icon.png            图标源文件（脚本生成，可派生全套图标）
-├─ docs/screenshots/       README 截图
-├─ scripts/
-│  └─ gen-icon.mjs         生成图标源 PNG（无第三方依赖）
-│  └─ smoke-convert.mjs    转换逻辑冒烟测试
-├─ src/                    前端
-│  ├─ main.ts              界面交互、文件操作、系统集成
-│  ├─ style.css            样式
+
+### 打包
+
+```bash
+# 根据当前系统生成默认安装产物
+npm run tauri -- build
+
+# 仅构建 Windows NSIS 安装程序
+npm run tauri -- build --bundles nsis
+```
+
+Windows NSIS 安装程序输出至：
+
+```text
+src-tauri/target/release/bundle/nsis/ExchangeMD_0.3.4_x64-setup.exe
+```
+
+## 项目结构
+
+```text
+├─ index.html                 界面结构
+├─ package.json               前端依赖与脚本
+├─ docs/screenshots/          README 截图
+├─ src/
+│  ├─ main.ts                 界面交互、文件操作、缩放、同步滚动和外观控制
+│  ├─ style.css               玻璃界面、编辑器与预览区样式
 │  └─ lib/
-│     ├─ markdown.ts       Markdown 渲染 / HTML 导出
-│     ├─ convert.ts        docx / xlsx / md 互转（含表格合并解析）
-│     └─ io.ts             文件读写（封装 Tauri 对话框 + Rust 命令）
-└─ src-tauri/              Rust 外壳
-   ├─ Cargo.toml           依赖（release 体积优化：opt-level=z, lto, strip）
-   ├─ tauri.conf.json      窗口 / CSP / 打包配置
-   ├─ capabilities/        权限
-   ├─ icons/               应用图标
-   └─ src/main.rs          文件读写、文件关联、打开外部链接
+│     ├─ appearance.ts         外观设置与背景素材本地存储
+│     ├─ convert.ts            docx、xlsx、Markdown 转换
+│     ├─ io.ts                 Tauri 文件读写封装
+│     └─ markdown.ts           Markdown 渲染与 HTML 导出
+└─ src-tauri/
+   ├─ src/main.rs             Rust 命令、文件关联与外部链接处理
+   ├─ icons/                  Windows 与 macOS 应用图标
+   └─ tauri.conf.json         窗口、CSP 与打包配置
 ```
 
----
+## 技术栈
 
-## 🔐 关于「设为默认程序」的说明
+- 桌面外壳：[Tauri v2](https://tauri.app/) 和 Rust。
+- 前端：原生 TypeScript 与 [Vite](https://vitejs.dev/)。
+- Word 导入：[mammoth](https://github.com/mwilliamson/mammoth)。
+- Excel 导入：[SheetJS](https://sheetjs.com/)。
+- Word 导出：[docx](https://github.com/dolanmiu/docx)。
+- HTML 转 Markdown：[turndown](https://github.com/mixmark-io/turndown) 和 `turndown-plugin-gfm`。
+- 渲染与清理：[markdown-it](https://github.com/markdown-it/markdown-it) 和 [DOMPurify](https://github.com/cure53/DOMPurify)。
 
-Windows 8 以后，系统用哈希保护「默认应用」设置，**任何程序都无法静默把自己设为默认**（直接写注册表会被系统重置，这是微软的安全设计）。因此本程序的「设为默认 Markdown 程序」会：
+## 许可证
 
-1. 注册好 ProgID（让 ExchangeMD 出现在默认应用列表里）；
-2. **自动打开系统「默认应用」设置页**，由你点一下确认。
-
-这是 Windows 限制下唯一可靠、合规的方式。
-
----
-
-## 🧰 技术栈
-
-- **外壳**：[Tauri v2](https://tauri.app/) (Rust) + 系统 WebView2
-- **前端**：原生 TypeScript + [Vite](https://vitejs.dev/)
-- **转换库**：[mammoth](https://github.com/mwilliamson/mammoth)（docx→HTML）、[SheetJS](https://sheetjs.com/)（xlsx）、[docx](https://github.com/dolanmiu/docx)（生成 docx）、[turndown](https://github.com/mixmark-io/turndown) + [turndown-plugin-gfm](https://github.com/domchristie/turndown-plugin-gfm)（HTML→Markdown）
-- **渲染**：[markdown-it](https://github.com/markdown-it/markdown-it) + [DOMPurify](https://github.com/cure53/DOMPurify)
-
----
-
-## 📄 许可证
-
-本项目采用 **MIT License** 开源，详见 [LICENSE](LICENSE)。
-
-> MIT 协议允许任何人**自由使用、复制、修改、合并、发布、分发甚至商用**本项目的代码，只需在副本中保留原始版权声明与许可声明即可。本项目不提供任何担保，作者不对使用后果承担责任。
-
-项目所引用的第三方库（Tauri、markdown-it、mammoth、SheetJS、docx、turndown、DOMPurify 等）均遵循各自的许可证。
+本项目采用 [MIT License](LICENSE) 开源。你可以使用、复制、修改、发布和商用本项目代码，但需保留原始版权和许可声明。

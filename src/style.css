@@ -409,7 +409,27 @@ textarea:focus-visible {
 #preview pre { background: #1f2937; color: #f9fafb; padding: 14px; overflow: auto; border-radius: 8px; }
 #preview code { font-family: 'Cascadia Code', Consolas, monospace; }
 #preview .code-block { position: relative; margin: 1em 0; }
-#preview .code-block pre { margin: 0; padding-top: 46px; }
+#preview .code-block pre { margin: 0; padding: 46px 0 10px; }
+#preview .code-block code { display: block; min-width: max-content; }
+#preview .code-line {
+  display: grid;
+  grid-template-columns: minmax(3.25rem, auto) minmax(0, 1fr);
+  min-width: 100%;
+}
+#preview .code-line-number {
+  padding: 0 12px;
+  border-right: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.42);
+  color: #94a3b8;
+  text-align: right;
+  user-select: none;
+}
+#preview .code-line-content { display: block; padding: 0 14px; white-space: pre; }
+#preview .json-key { color: #7dd3fc; }
+#preview .json-string { color: #a7f3d0; }
+#preview .json-number { color: #fbbf24; }
+#preview .json-boolean { color: #f9a8d4; }
+#preview .json-null { color: #c4b5fd; }
 #preview .code-copy-btn {
   position: absolute;
   top: 8px;

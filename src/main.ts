@@ -302,10 +302,87 @@ function renderOnly() {
   schedulePersist()
 }
 
+const JSON_TOKEN = /"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b/g
+
+function codeLanguage(code: HTMLElement) {
+  return [...code.classList]
+    .find((className) => className.startsWith('language-'))
+    ?.slice('language-'.length)
+    .toLowerCase() || ''
+}
+
+function isJsonLanguage(language: string) {
+  return language === 'json' || language === 'jsonc' || language === 'application/json'
+}
+
+function appendJsonTokens(container: HTMLElement, line: string) {
+  let previousEnd = 0
+  for (const match of line.matchAll(JSON_TOKEN)) {
+    const token = match[0]
+    const start = match.index ?? 0
+    const end = start + token.length
+    container.append(document.createTextNode(line.slice(previousEnd, start)))
+
+    const span = document.createElement('span')
+    const following = line.slice(end)
+    if (token.startsWith('"')) {
+      span.className = /^\s*:/.test(following) ? 'json-key' : 'json-string'
+    } else if (token === 'true' || token === 'false') {
+      span.className = 'json-boolean'
+    } else if (token === 'null') {
+      span.className = 'json-null'
+    } else {
+      span.className = 'json-number'
+    }
+    span.textContent = token
+    container.append(span)
+    previousEnd = end
+  }
+  container.append(document.createTextNode(line.slice(previousEnd)))
+}
+
+function enhanceCodeBlock(code: HTMLElement) {
+  const source = code.textContent || ''
+  const hasTrailingNewline = source.endsWith('\n')
+  const lines = (hasTrailingNewline ? source.slice(0, -1) : source).split('\n')
+  const json = isJsonLanguage(codeLanguage(code))
+
+  code.textContent = ''
+  code.classList.add('code-with-line-numbers')
+  code.classList.toggle('json-highlight', json)
+  code.dataset.trailingNewline = String(hasTrailingNewline)
+
+  lines.forEach((line, index) => {
+    const row = document.createElement('span')
+    const lineNumber = document.createElement('span')
+    const lineContent = document.createElement('span')
+    row.className = 'code-line'
+    lineNumber.className = 'code-line-number'
+    lineNumber.setAttribute('aria-hidden', 'true')
+    lineNumber.textContent = String(index + 1)
+    lineContent.className = 'code-line-content'
+
+    if (json) appendJsonTokens(lineContent, line)
+    else lineContent.textContent = line
+
+    row.append(lineNumber, lineContent)
+    code.append(row)
+  })
+}
+
+function codeBlockText(code: HTMLElement) {
+  const lines = [...code.querySelectorAll<HTMLElement>('.code-line-content')]
+  if (!lines.length) return code.textContent || ''
+  const source = lines.map((line) => line.textContent || '').join('\n')
+  return code.dataset.trailingNewline === 'true' ? `${source}\n` : source
+}
+
 function renderPreview(value: string) {
   preview.innerHTML = renderMarkdown(value)
   preview.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
-    if (!pre.querySelector('code')) return
+    const code = pre.querySelector<HTMLElement>('code')
+    if (!code) return
+    enhanceCodeBlock(code)
     const wrapper = document.createElement('div')
     const button = document.createElement('button')
     wrapper.className = 'code-block'
@@ -772,7 +849,7 @@ preview.addEventListener('click', async (e) => {
   const code = button.closest('.code-block')?.querySelector('code')
   if (!code) return
   try {
-    await navigator.clipboard.writeText(code.textContent || '')
+    await navigator.clipboard.writeText(codeBlockText(code))
     button.textContent = '已复制'
     showToast('已复制代码', 'success')
     setTimeout(() => { button.textContent = '复制' }, 1600)

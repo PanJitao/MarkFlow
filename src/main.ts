@@ -4,9 +4,13 @@ import hljs from 'highlight.js/lib/core'
 import c from 'highlight.js/lib/languages/c'
 import cpp from 'highlight.js/lib/languages/cpp'
 import csharp from 'highlight.js/lib/languages/csharp'
+import dos from 'highlight.js/lib/languages/dos'
 import java from 'highlight.js/lib/languages/java'
 import javascript from 'highlight.js/lib/languages/javascript'
+import pgsql from 'highlight.js/lib/languages/pgsql'
+import powershell from 'highlight.js/lib/languages/powershell'
 import python from 'highlight.js/lib/languages/python'
+import sql from 'highlight.js/lib/languages/sql'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
 import { docxToMarkdown, xlsxToMarkdown, markdownToDocxBlob } from './lib/convert'
 import {
@@ -35,9 +39,13 @@ import {
 hljs.registerLanguage('c', c)
 hljs.registerLanguage('cpp', cpp)
 hljs.registerLanguage('csharp', csharp)
+hljs.registerLanguage('dos', dos)
 hljs.registerLanguage('java', java)
 hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('pgsql', pgsql)
+hljs.registerLanguage('powershell', powershell)
 hljs.registerLanguage('python', python)
+hljs.registerLanguage('sql', sql)
 
 const SAMPLE = `# 欢迎使用 ExchangeMD
 
@@ -325,14 +333,30 @@ const CODE_LANGUAGE_ALIASES: Record<string, string> = {
   csharp: 'csharp',
   'c#': 'csharp',
   cs: 'csharp',
+  bat: 'dos',
+  batch: 'dos',
+  cmd: 'dos',
+  dos: 'dos',
   java: 'java',
   javascript: 'javascript',
   js: 'javascript',
   node: 'javascript',
   'node.js': 'javascript',
   nodejs: 'javascript',
+  postgres: 'pgsql',
+  postgresql: 'pgsql',
+  pgsql: 'pgsql',
+  powershell: 'powershell',
+  ps: 'powershell',
+  ps1: 'powershell',
+  pwsh: 'powershell',
   py: 'python',
   python: 'python',
+  mysql: 'sql',
+  plsql: 'sql',
+  sql: 'sql',
+  sqlite: 'sql',
+  tsql: 'sql',
 }
 
 function codeLanguage(code: HTMLElement) {

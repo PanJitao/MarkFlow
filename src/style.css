@@ -486,10 +486,10 @@ textarea:focus-visible {
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.68);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, calc(var(--panel-opacity) * 0.94));
+  background: rgba(255, 255, 255, 0.84);
   box-shadow: 0 14px 32px rgba(31, 41, 55, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  -webkit-backdrop-filter: blur(var(--panel-header-blur)) saturate(145%);
-  backdrop-filter: blur(var(--panel-header-blur)) saturate(145%);
+  -webkit-backdrop-filter: blur(20px) saturate(155%);
+  backdrop-filter: blur(20px) saturate(155%);
 }
 #editor-context-menu[hidden] { display: none; }
 #editor-context-menu button {
@@ -531,10 +531,10 @@ textarea:focus-visible {
   overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.68);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, calc(var(--panel-opacity) * 0.96));
+  background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 14px 32px rgba(31, 41, 55, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  -webkit-backdrop-filter: blur(var(--panel-header-blur)) saturate(145%);
-  backdrop-filter: blur(var(--panel-header-blur)) saturate(145%);
+  -webkit-backdrop-filter: blur(20px) saturate(155%);
+  backdrop-filter: blur(20px) saturate(155%);
   opacity: 0;
   pointer-events: none;
   transform: translateX(-4px);

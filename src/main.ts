@@ -616,6 +616,19 @@ function openContextSubmenu(trigger: HTMLButtonElement) {
     item.parentElement?.classList.toggle('open', open)
     item.setAttribute('aria-expanded', String(open))
   })
+
+  const submenu = trigger.parentElement?.querySelector<HTMLElement>('.editor-context-submenu')
+  if (!submenu) return
+  submenu.style.top = '-6px'
+  const inset = 8
+  let top = -6
+  let bounds = submenu.getBoundingClientRect()
+  if (bounds.bottom > window.innerHeight - inset) {
+    top -= bounds.bottom - (window.innerHeight - inset)
+    submenu.style.top = `${top}px`
+    bounds = submenu.getBoundingClientRect()
+  }
+  if (bounds.top < inset) submenu.style.top = `${top + inset - bounds.top}px`
 }
 
 function openEditorContextMenu(event: MouseEvent) {

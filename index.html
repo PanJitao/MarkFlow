@@ -207,6 +207,23 @@
       </form>
     </dialog>
 
+    <dialog id="update-dialog" class="appearance-dialog update-dialog" aria-labelledby="update-title">
+      <form method="dialog">
+        <header class="appearance-header">
+          <h2 id="update-title">发现新版本</h2>
+        </header>
+        <div class="update-body">
+          <p id="update-version" class="update-version"></p>
+          <p id="update-status" class="update-status"></p>
+          <progress id="update-progress" max="100" value="0" aria-label="更新下载进度"></progress>
+        </div>
+        <footer class="appearance-footer">
+          <button type="button" id="update-later-btn">稍后</button>
+          <button type="button" id="update-confirm-btn" class="primary">下载并安装</button>
+        </footer>
+      </form>
+    </dialog>
+
     <div id="editor-context-menu" class="editor-context-menu" role="menu" aria-label="编辑器右键菜单" hidden>
       <button type="button" data-context-action="copy" role="menuitem">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>

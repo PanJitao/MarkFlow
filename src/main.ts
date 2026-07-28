@@ -11,6 +11,9 @@ import pgsql from 'highlight.js/lib/languages/pgsql'
 import powershell from 'highlight.js/lib/languages/powershell'
 import python from 'highlight.js/lib/languages/python'
 import sql from 'highlight.js/lib/languages/sql'
+import { isTauri } from '@tauri-apps/api/core'
+import { relaunch } from '@tauri-apps/plugin-process'
+import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
 import { docxToMarkdown, xlsxToMarkdown, markdownToDocxBlob } from './lib/convert'
 import {
@@ -78,7 +81,13 @@ const customBackground = document.querySelector<HTMLElement>('#custom-background
 const backgroundImage = document.querySelector<HTMLImageElement>('#background-image')!
 const backgroundVideo = document.querySelector<HTMLVideoElement>('#background-video')!
 const appearanceDialog = document.querySelector<HTMLDialogElement>('#appearance-dialog')!
+const updateDialog = document.querySelector<HTMLDialogElement>('#update-dialog')!
 const appearanceSettingsBtn = document.querySelector<HTMLButtonElement>('#appearance-settings-btn')!
+const updateVersionEl = document.querySelector<HTMLElement>('#update-version')!
+const updateStatusEl = document.querySelector<HTMLElement>('#update-status')!
+const updateProgressEl = document.querySelector<HTMLProgressElement>('#update-progress')!
+const updateLaterBtn = document.querySelector<HTMLButtonElement>('#update-later-btn')!
+const updateConfirmBtn = document.querySelector<HTMLButtonElement>('#update-confirm-btn')!
 const chooseBackgroundBtn = document.querySelector<HTMLButtonElement>('#choose-background-btn')!
 const clearBackgroundBtn = document.querySelector<HTMLButtonElement>('#clear-background-btn')!
 const backgroundFileInput = document.querySelector<HTMLInputElement>('#background-file-input')!
@@ -101,6 +110,8 @@ let backgroundObjectUrl: string | null = null
 let contextSelection: { start: number; end: number } | null = null
 let pendingContextSelection: { start: number; end: number } | null = null
 let lastNonEmptySelection: { start: number; end: number } | null = null
+let availableUpdate: Update | null = null
+let updateInstalling = false
 
 let markdown = SAMPLE
 let currentFile: string | null = null
@@ -172,6 +183,73 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'info')
     toastEl.className = 'toast'
   }, 3200)
 }
+
+// ---------- 在线更新 ----------
+
+function setUpdateControls(disabled: boolean) {
+  updateLaterBtn.disabled = disabled
+  updateConfirmBtn.disabled = disabled
+}
+
+function showUpdateProgress(event: DownloadEvent, state: { total: number; downloaded: number }) {
+  if (event.event === 'Started') {
+    state.total = event.data.contentLength || 0
+    state.downloaded = 0
+    updateProgressEl.value = 0
+    updateStatusEl.textContent = '正在下载更新…'
+    return
+  }
+  if (event.event === 'Progress') {
+    state.downloaded += event.data.chunkLength
+    if (state.total > 0) {
+      const percent = Math.min(100, Math.round((state.downloaded / state.total) * 100))
+      updateProgressEl.value = percent
+      updateStatusEl.textContent = `正在下载更新… ${percent}%`
+    }
+    return
+  }
+  updateProgressEl.value = 100
+  updateStatusEl.textContent = '下载完成，正在安装…'
+}
+
+async function checkForUpdate() {
+  if (!isTauri()) return
+  try {
+    const update = await check({ timeout: 12_000 })
+    if (!update) return
+    availableUpdate = update
+    updateInstalling = false
+    updateVersionEl.textContent = `发现新版本 ${update.version}，当前版本 ${update.currentVersion}`
+    updateStatusEl.textContent = update.body || '确认后将下载并安装更新。'
+    updateProgressEl.value = 0
+    setUpdateControls(false)
+    if (!updateDialog.open) updateDialog.showModal()
+  } catch (err) {
+    console.warn('检查更新失败', err)
+  }
+}
+
+updateLaterBtn.addEventListener('click', () => updateDialog.close())
+updateDialog.addEventListener('cancel', (event) => {
+  if (updateInstalling) event.preventDefault()
+})
+
+updateConfirmBtn.addEventListener('click', async () => {
+  if (!availableUpdate || updateInstalling) return
+  updateInstalling = true
+  setUpdateControls(true)
+  const download = { total: 0, downloaded: 0 }
+  try {
+    await availableUpdate.downloadAndInstall((event) => showUpdateProgress(event, download))
+    updateStatusEl.textContent = '安装完成，正在重新启动…'
+    await relaunch()
+  } catch (err) {
+    updateInstalling = false
+    setUpdateControls(false)
+    updateStatusEl.textContent = `更新失败：${errMsg(err)}`
+    showToast(`更新失败：${errMsg(err)}`, 'error')
+  }
+})
 
 // ---------- 外观设置 ----------
 
@@ -1240,4 +1318,5 @@ async function init() {
 
 applyAppearance(appearanceSettings)
 void restoreBackground()
-init()
+void init()
+setTimeout(() => void checkForUpdate(), 1200)

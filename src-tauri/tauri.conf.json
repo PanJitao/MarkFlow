@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ExchangeMD",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "identifier": "com.exchangemd.app",
   "build": {
     "frontendDist": "../dist",
@@ -28,7 +28,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi", "dmg", "deb", "appimage", "rpm"],
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis", "msi", "app", "dmg", "deb", "appimage", "rpm"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -41,6 +42,14 @@
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU3N0JGMUM5NjMxNDEyODQKUldTRUVoUmp5ZkY3NStWdk96NXV1a1VSYlErYTQ2VzVHVGVIMlp3ZjB0UEpZTUpreU11bE9mSTUK",
+      "endpoints": [
+        "https://github.com/PanJitao/word-to-markdown/releases/latest/download/latest.json"
+      ]
     }
   }
 }

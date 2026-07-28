@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "ExchangeMD 默认权限：窗口 + 文件对话框",
+  "description": "ExchangeMD 默认权限：窗口、文件和在线更新",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "dialog:default",
+    "process:default",
+    "updater:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",

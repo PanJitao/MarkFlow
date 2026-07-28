@@ -1,5 +1,12 @@
 // 主界面与交互：Markdown 源码编辑 + 实时预览 + 文件转换
 import './style.css'
+import hljs from 'highlight.js/lib/core'
+import c from 'highlight.js/lib/languages/c'
+import cpp from 'highlight.js/lib/languages/cpp'
+import csharp from 'highlight.js/lib/languages/csharp'
+import java from 'highlight.js/lib/languages/java'
+import javascript from 'highlight.js/lib/languages/javascript'
+import python from 'highlight.js/lib/languages/python'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
 import { docxToMarkdown, xlsxToMarkdown, markdownToDocxBlob } from './lib/convert'
 import {
@@ -24,6 +31,13 @@ import {
   openDefaultAppsSettings,
   openUrl,
 } from './lib/io'
+
+hljs.registerLanguage('c', c)
+hljs.registerLanguage('cpp', cpp)
+hljs.registerLanguage('csharp', csharp)
+hljs.registerLanguage('java', java)
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('python', python)
 
 const SAMPLE = `# 欢迎使用 ExchangeMD
 
@@ -303,6 +317,23 @@ function renderOnly() {
 }
 
 const JSON_TOKEN = /"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b/g
+const CODE_LANGUAGE_ALIASES: Record<string, string> = {
+  c: 'c',
+  'c++': 'cpp',
+  cc: 'cpp',
+  cpp: 'cpp',
+  csharp: 'csharp',
+  'c#': 'csharp',
+  cs: 'csharp',
+  java: 'java',
+  javascript: 'javascript',
+  js: 'javascript',
+  node: 'javascript',
+  'node.js': 'javascript',
+  nodejs: 'javascript',
+  py: 'python',
+  python: 'python',
+}
 
 function codeLanguage(code: HTMLElement) {
   return [...code.classList]
@@ -313,6 +344,10 @@ function codeLanguage(code: HTMLElement) {
 
 function isJsonLanguage(language: string) {
   return language === 'json' || language === 'jsonc' || language === 'application/json'
+}
+
+function codeHighlightLanguage(language: string) {
+  return CODE_LANGUAGE_ALIASES[language] || ''
 }
 
 function appendJsonTokens(container: HTMLElement, line: string) {
@@ -341,15 +376,23 @@ function appendJsonTokens(container: HTMLElement, line: string) {
   container.append(document.createTextNode(line.slice(previousEnd)))
 }
 
+function appendHighlightedLine(container: HTMLElement, line: string, language: string) {
+  // Highlight.js escapes source text before returning its span markup.
+  container.innerHTML = hljs.highlight(line, { language, ignoreIllegals: true }).value
+}
+
 function enhanceCodeBlock(code: HTMLElement) {
   const source = code.textContent || ''
   const hasTrailingNewline = source.endsWith('\n')
   const lines = (hasTrailingNewline ? source.slice(0, -1) : source).split('\n')
-  const json = isJsonLanguage(codeLanguage(code))
+  const language = codeLanguage(code)
+  const json = isJsonLanguage(language)
+  const highlightLanguage = codeHighlightLanguage(language)
 
   code.textContent = ''
   code.classList.add('code-with-line-numbers')
   code.classList.toggle('json-highlight', json)
+  code.classList.toggle('syntax-highlight', Boolean(highlightLanguage))
   code.dataset.trailingNewline = String(hasTrailingNewline)
 
   lines.forEach((line, index) => {
@@ -363,6 +406,7 @@ function enhanceCodeBlock(code: HTMLElement) {
     lineContent.className = 'code-line-content'
 
     if (json) appendJsonTokens(lineContent, line)
+    else if (highlightLanguage) appendHighlightedLine(lineContent, line, highlightLanguage)
     else lineContent.textContent = line
 
     row.append(lineNumber, lineContent)

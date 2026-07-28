@@ -93,9 +93,14 @@ const panelBlurValue = document.querySelector<HTMLElement>('#panel-blur-value')!
 const editorColorInput = document.querySelector<HTMLInputElement>('#editor-color-input')!
 const previewColorInput = document.querySelector<HTMLInputElement>('#preview-color-input')!
 const resetAppearanceBtn = document.querySelector<HTMLButtonElement>('#reset-appearance-btn')!
+const editorContextMenu = document.querySelector<HTMLElement>('#editor-context-menu')!
+const contextSubmenuTriggers = [...editorContextMenu.querySelectorAll<HTMLButtonElement>('[data-context-submenu]')]
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 let appearanceSettings = loadAppearanceSettings()
 let backgroundObjectUrl: string | null = null
+let contextSelection: { start: number; end: number } | null = null
+let pendingContextSelection: { start: number; end: number } | null = null
+let lastNonEmptySelection: { start: number; end: number } | null = null
 
 let markdown = SAMPLE
 let currentFile: string | null = null
@@ -523,6 +528,17 @@ function insertBlock(block: string) {
   applyEdit(next, start + block.length, start + block.length)
 }
 
+function insertCodeBlock(language: string) {
+  const { text, start, end } = getSelection()
+  const selected = text.slice(start, end)
+  const prefix = start > 0 && text[start - 1] !== '\n' ? '\n' : ''
+  const suffix = end < text.length && text[end] !== '\n' ? '\n' : ''
+  const opening = `\`\`\`${language}\n`
+  const block = `${prefix}${opening}${selected}\n\`\`\`${suffix}`
+  const contentStart = start + prefix.length + opening.length
+  applyEdit(text.slice(0, start) + block + text.slice(end), contentStart, contentStart + selected.length)
+}
+
 /** Tab：无选区插入两个空格；有选区则给选中的每一行加两格缩进 */
 function indentOrInsert() {
   const { text, start, end } = getSelection()
@@ -562,7 +578,7 @@ function handleToolbar(action: string) {
     case 'list': return prefixLines('- ')
     case 'quote': return prefixLines('> ')
     case 'code':
-      return insertBlock('\n```text\n\n```\n')
+      return insertCodeBlock('text')
     case 'table':
       return insertBlock('\n| 列名 | 数值 |\n| --- | --- |\n| 示例 | 内容 |\n')
     case 'link': {
@@ -574,6 +590,71 @@ function handleToolbar(action: string) {
       return
     }
   }
+}
+
+function restoreContextSelection() {
+  if (!contextSelection) return
+  const start = Math.min(contextSelection.start, editor.value.length)
+  const end = Math.min(contextSelection.end, editor.value.length)
+  editor.focus()
+  editor.setSelectionRange(start, end)
+}
+
+function closeEditorContextMenu() {
+  editorContextMenu.hidden = true
+  editorContextMenu.classList.remove('opens-left')
+  contextSubmenuTriggers.forEach((trigger) => {
+    trigger.parentElement?.classList.remove('open')
+    trigger.setAttribute('aria-expanded', 'false')
+  })
+  contextSelection = null
+}
+
+function openContextSubmenu(trigger: HTMLButtonElement) {
+  contextSubmenuTriggers.forEach((item) => {
+    const open = item === trigger
+    item.parentElement?.classList.toggle('open', open)
+    item.setAttribute('aria-expanded', String(open))
+  })
+}
+
+function openEditorContextMenu(event: MouseEvent) {
+  const currentSelection = {
+    start: editor.selectionStart ?? 0,
+    end: editor.selectionEnd ?? 0,
+  }
+  contextSelection = pendingContextSelection
+    ?? (currentSelection.start !== currentSelection.end ? currentSelection : lastNonEmptySelection)
+    ?? currentSelection
+  pendingContextSelection = null
+  lastNonEmptySelection = null
+  editorContextMenu.hidden = false
+  const width = editorContextMenu.offsetWidth
+  const height = editorContextMenu.offsetHeight
+  const left = Math.min(event.clientX, window.innerWidth - width - 8)
+  const top = Math.min(event.clientY, window.innerHeight - height - 8)
+  editorContextMenu.style.left = `${Math.max(8, left)}px`
+  editorContextMenu.style.top = `${Math.max(8, top)}px`
+  editorContextMenu.classList.toggle('opens-left', left + width * 2 + 12 > window.innerWidth)
+  editorContextMenu.querySelector<HTMLButtonElement>('[data-context-action="copy"]')?.focus({ preventScroll: true })
+}
+
+async function copyEditorSelection() {
+  const { text, start, end } = getSelection()
+  const value = text.slice(start, end) || text
+  if (!value) {
+    showToast('没有可复制的内容', 'info')
+    return
+  }
+  await navigator.clipboard.writeText(value)
+  showToast('已复制', 'success')
+}
+
+async function pasteIntoEditor() {
+  const value = await navigator.clipboard.readText()
+  if (!value) return
+  insertBlock(value)
+  showToast('已粘贴', 'success')
 }
 
 // ---------- 文件操作 ----------
@@ -712,7 +793,78 @@ document.querySelectorAll<HTMLButtonElement>('[data-file]').forEach((btn) => {
   })
 })
 
-editor.addEventListener('input', renderOnly)
+editor.addEventListener('input', () => {
+  lastNonEmptySelection = null
+  renderOnly()
+})
+
+editor.addEventListener('select', () => {
+  const start = editor.selectionStart ?? 0
+  const end = editor.selectionEnd ?? 0
+  if (start !== end) lastNonEmptySelection = { start, end }
+})
+editor.addEventListener('pointerdown', (event) => {
+  if (event.button !== 2) {
+    lastNonEmptySelection = null
+    return
+  }
+  pendingContextSelection = {
+    start: editor.selectionStart ?? 0,
+    end: editor.selectionEnd ?? 0,
+  }
+})
+editor.addEventListener('contextmenu', (event) => {
+  event.preventDefault()
+  openEditorContextMenu(event)
+})
+
+contextSubmenuTriggers.forEach((trigger) => {
+  const wrapper = trigger.parentElement!
+  wrapper.addEventListener('pointerenter', () => openContextSubmenu(trigger))
+  wrapper.addEventListener('pointerleave', () => {
+    wrapper.classList.remove('open')
+    trigger.setAttribute('aria-expanded', 'false')
+  })
+  trigger.addEventListener('click', () => openContextSubmenu(trigger))
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowRight') return
+    event.preventDefault()
+    openContextSubmenu(trigger)
+    wrapper.querySelector<HTMLButtonElement>('.editor-context-submenu button')?.focus()
+  })
+})
+
+editorContextMenu.addEventListener('click', async (event) => {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  if (target.closest('[data-context-submenu]')) return
+
+  const format = target.closest<HTMLButtonElement>('[data-context-format]')?.dataset.contextFormat
+  const language = target.closest<HTMLButtonElement>('[data-context-code]')?.dataset.contextCode
+  const action = target.closest<HTMLButtonElement>('[data-context-action]')?.dataset.contextAction
+  if (!format && !language && !action) return
+
+  restoreContextSelection()
+  try {
+    if (format) handleToolbar(format)
+    else if (language) insertCodeBlock(language)
+    else if (action === 'copy') await copyEditorSelection()
+    else if (action === 'paste') await pasteIntoEditor()
+    else if (action === 'table' || action === 'quote') handleToolbar(action)
+  } catch (err) {
+    showToast(`操作失败：${errMsg(err)}`, 'error')
+  }
+  closeEditorContextMenu()
+})
+
+document.addEventListener('pointerdown', (event) => {
+  if (!editorContextMenu.hidden && !editorContextMenu.contains(event.target as Node)) closeEditorContextMenu()
+})
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !editorContextMenu.hidden) closeEditorContextMenu()
+})
+window.addEventListener('resize', closeEditorContextMenu)
+editor.addEventListener('scroll', closeEditorContextMenu)
 
 // ---------- 外部链接：拦截点击，用系统浏览器打开，绝不接管当前窗口 ----------
 

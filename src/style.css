@@ -12,6 +12,11 @@
   --content-soft-opacity: 0.038;
   --content-surface-opacity: 0.16;
   --content-accent-opacity: 0.818;
+  --code-block-opacity: 0.36;
+  --code-gutter-opacity: 0.26;
+  --code-shadow-opacity: 0.206;
+  --code-border-opacity: 0.241;
+  --code-block-blur: 10px;
   --glass-button-opacity: 0.357;
   --glass-button-hover-opacity: 0.489;
   --glass-highlight-opacity: 0.263;
@@ -19,6 +24,8 @@
   --glass-primary-hover-opacity: 0.658;
   --panel-blur: 18px;
   --panel-header-blur: 12px;
+  --content-blur: 16px;
+  --glass-blur: 8px;
   --glass-text: #20262e;
   --button-text: #20262e;
   --surface: rgba(252, 248, 242, var(--panel-opacity));
@@ -83,6 +90,8 @@ body { position: relative; isolation: isolate; overflow: hidden; }
 
 /* ---------- 顶栏 ---------- */
 .topbar {
+  position: relative;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -92,6 +101,8 @@ body { position: relative; isolation: isolate; overflow: hidden; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(145%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(145%);
   flex-wrap: wrap;
 }
 
@@ -103,7 +114,7 @@ body { position: relative; isolation: isolate; overflow: hidden; }
   height: 40px;
   border-radius: 9px;
 }
-.brand-text h1 { margin: 0; font-size: 18px; letter-spacing: 0.2px; }
+.brand-text h1 { margin: 0; color: var(--glass-text); font-size: 18px; letter-spacing: 0.2px; }
 .brand-text p { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); }
 
 .actions {
@@ -118,6 +129,26 @@ body { position: relative; isolation: isolate; overflow: hidden; }
   color: var(--text-soft);
   margin-right: 4px;
   align-self: center;
+}
+
+.adaptive-contrast {
+  position: relative;
+  z-index: 1;
+  color: var(--button-text);
+}
+
+@supports (mix-blend-mode: difference) {
+  .adaptive-contrast-enabled #app .brand-text h1,
+  .adaptive-contrast-enabled #app .brand-text p,
+  .adaptive-contrast-enabled #app .group-label,
+  .adaptive-contrast-enabled #app .toolbar .shortcut-hint,
+  .adaptive-contrast-enabled #app .panel-header h2,
+  .adaptive-contrast-enabled #app .panel-header span,
+  .adaptive-contrast-enabled #app button .adaptive-contrast {
+    color: #ffffff;
+    mix-blend-mode: difference;
+    text-shadow: none;
+  }
 }
 .action-divider {
   width: 1px;
@@ -149,8 +180,8 @@ button {
     inset 0 -1px 0 rgba(255, 255, 255, 0.2),
     0 5px 14px rgba(31, 41, 55, 0.12),
     0 1px 2px rgba(31, 41, 55, 0.08);
-  -webkit-backdrop-filter: blur(6px) saturate(155%) contrast(108%);
-  backdrop-filter: blur(6px) saturate(155%) contrast(108%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(155%) contrast(108%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(155%) contrast(108%);
   cursor: pointer;
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
@@ -219,6 +250,8 @@ textarea:focus-visible {
 
 /* ---------- 格式工具栏 ---------- */
 .toolbar {
+  position: relative;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -226,6 +259,8 @@ textarea:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(145%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(145%);
   flex-wrap: wrap;
 }
 .toolbar-divider {
@@ -239,6 +274,8 @@ textarea:focus-visible {
 
 /* ---------- 工作区（可拖拽分栏） ---------- */
 .workspace {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: stretch;
   min-height: 0;
@@ -277,8 +314,8 @@ textarea:focus-visible {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.88),
     0 4px 10px rgba(31, 41, 55, 0.14);
-  -webkit-backdrop-filter: blur(6px) saturate(145%);
-  backdrop-filter: blur(6px) saturate(145%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(145%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(145%);
   transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 .splitter:hover::after,
@@ -382,6 +419,8 @@ textarea:focus-visible {
   box-shadow:
     inset 0 14px 22px -22px rgba(31, 41, 55, 0.5),
     inset 1px 0 0 rgba(255, 255, 255, 0.22);
+  -webkit-backdrop-filter: blur(var(--content-blur)) saturate(140%);
+  backdrop-filter: blur(var(--content-blur)) saturate(140%);
   tab-size: 2;
   outline: none;
 }
@@ -399,6 +438,8 @@ textarea:focus-visible {
   box-shadow:
     inset 0 14px 22px -22px rgba(31, 41, 55, 0.48),
     inset -1px 0 0 rgba(255, 255, 255, 0.2);
+  -webkit-backdrop-filter: blur(var(--content-blur)) saturate(140%);
+  backdrop-filter: blur(var(--content-blur)) saturate(140%);
   color: var(--preview-text);
   font-size: calc(16px * var(--content-scale));
   line-height: 1.7;
@@ -436,7 +477,22 @@ textarea:focus-visible {
 #preview .table-edge:hover .table-edge-btn,
 #preview .table-edge-btn:focus-visible { opacity: 1; transform: scale(1); }
 #preview .table-edge:hover .table-edge-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-#preview pre { background: #1f2937; color: #f9fafb; padding: 14px; overflow: auto; border-radius: 8px; }
+#preview pre {
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid rgba(226, 232, 240, var(--code-border-opacity));
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.1), transparent 58%),
+    rgba(15, 23, 42, var(--code-block-opacity));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(2, 6, 23, 0.2),
+    0 12px 28px rgba(2, 6, 23, var(--code-shadow-opacity));
+  -webkit-backdrop-filter: blur(var(--code-block-blur)) saturate(135%);
+  backdrop-filter: blur(var(--code-block-blur)) saturate(135%);
+  color: #f8fafc;
+}
 #preview code { font-family: 'Cascadia Code', Consolas, monospace; }
 #preview .code-block { position: relative; margin: 1em 0; }
 #preview .code-block pre { margin: 0; padding: 10px 0; }
@@ -448,30 +504,30 @@ textarea:focus-visible {
 }
 #preview .code-line-number {
   padding: 0 12px;
-  border-right: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.42);
+  border-right: 1px solid rgba(226, 232, 240, var(--code-border-opacity));
+  background: rgba(2, 6, 23, var(--code-gutter-opacity));
   color: #94a3b8;
   text-align: right;
   user-select: none;
 }
 #preview .code-line-content { display: block; padding: 0 14px; white-space: pre; }
-#preview .json-key { color: #7dd3fc; }
-#preview .json-string { color: #a7f3d0; }
-#preview .json-number { color: #fbbf24; }
-#preview .json-boolean { color: #f9a8d4; }
-#preview .json-null { color: #c4b5fd; }
-#preview .hljs-comment { color: #94a3b8; }
+#preview .json-key { color: #7dd3fc; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
+#preview .json-string { color: #a7f3d0; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
+#preview .json-number { color: #fbbf24; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
+#preview .json-boolean { color: #f9a8d4; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
+#preview .json-null { color: #c4b5fd; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
+#preview .hljs-comment { color: #cbd5e1; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
 #preview .hljs-keyword,
 #preview .hljs-literal,
-#preview .hljs-type { color: #c4b5fd; }
+#preview .hljs-type { color: #c4b5fd; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
 #preview .hljs-string,
-#preview .hljs-attr { color: #a7f3d0; }
-#preview .hljs-number { color: #fbbf24; }
+#preview .hljs-attr { color: #a7f3d0; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
+#preview .hljs-number { color: #fbbf24; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
 #preview .hljs-title,
 #preview .hljs-title\.function_,
-#preview .hljs-function .hljs-title { color: #7dd3fc; }
+#preview .hljs-function .hljs-title { color: #7dd3fc; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
 #preview .hljs-built_in,
-#preview .hljs-params { color: #f9a8d4; }
+#preview .hljs-params { color: #f9a8d4; text-shadow: 0 1px 1px rgba(2, 6, 23, 0.76); }
 #preview .code-copy-btn {
   position: absolute;
   top: 8px;

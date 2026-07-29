@@ -14,6 +14,7 @@ MarkFlow.exe
 MarkFlow-rebuild-source.zip
 ExchangeMD-rebuild-source.zip
 output/
+.playwright-cli/
 
 # 本地环境与编辑器
 .DS_Store

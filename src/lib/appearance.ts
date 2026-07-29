@@ -2,6 +2,8 @@ export interface AppearanceSettings {
   backgroundColor: string
   backgroundOpacity: number
   panelOpacity: number
+  codeBlockOpacity: number
+  adaptiveContrastEnabled: boolean
   panelBlurEnabled: boolean
   buttonTextColor: string
   editorColor: string
@@ -18,6 +20,8 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   backgroundColor: '#efe4d6',
   backgroundOpacity: 100,
   panelOpacity: 94,
+  codeBlockOpacity: 36,
+  adaptiveContrastEnabled: true,
   panelBlurEnabled: true,
   buttonTextColor: '#20262e',
   editorColor: '#1f1b15',
@@ -47,6 +51,10 @@ export function loadAppearanceSettings(): AppearanceSettings {
       backgroundColor: isColor(saved.backgroundColor) ? saved.backgroundColor : DEFAULT_APPEARANCE.backgroundColor,
       backgroundOpacity: clamp(saved.backgroundOpacity, 0, 100, DEFAULT_APPEARANCE.backgroundOpacity),
       panelOpacity: clamp(saved.panelOpacity, 5, 100, DEFAULT_APPEARANCE.panelOpacity),
+      codeBlockOpacity: clamp(saved.codeBlockOpacity, 0, 100, DEFAULT_APPEARANCE.codeBlockOpacity),
+      adaptiveContrastEnabled: typeof saved.adaptiveContrastEnabled === 'boolean'
+        ? saved.adaptiveContrastEnabled
+        : DEFAULT_APPEARANCE.adaptiveContrastEnabled,
       panelBlurEnabled: typeof saved.panelBlurEnabled === 'boolean'
         ? saved.panelBlurEnabled
         : DEFAULT_APPEARANCE.panelBlurEnabled,

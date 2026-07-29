@@ -12,6 +12,7 @@ import powershell from 'highlight.js/lib/languages/powershell'
 import python from 'highlight.js/lib/languages/python'
 import sql from 'highlight.js/lib/languages/sql'
 import { isTauri } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
@@ -97,6 +98,10 @@ const backgroundOpacityInput = document.querySelector<HTMLInputElement>('#backgr
 const backgroundOpacityValue = document.querySelector<HTMLOutputElement>('#background-opacity-value')!
 const panelOpacityInput = document.querySelector<HTMLInputElement>('#panel-opacity-input')!
 const panelOpacityValue = document.querySelector<HTMLOutputElement>('#panel-opacity-value')!
+const codeBlockOpacityInput = document.querySelector<HTMLInputElement>('#code-block-opacity-input')!
+const codeBlockOpacityValue = document.querySelector<HTMLOutputElement>('#code-block-opacity-value')!
+const adaptiveContrastToggle = document.querySelector<HTMLButtonElement>('#adaptive-contrast-toggle')!
+const adaptiveContrastValue = document.querySelector<HTMLElement>('#adaptive-contrast-value')!
 const panelBlurToggle = document.querySelector<HTMLButtonElement>('#panel-blur-toggle')!
 const panelBlurValue = document.querySelector<HTMLElement>('#panel-blur-value')!
 const buttonTextColorInput = document.querySelector<HTMLInputElement>('#button-text-color-input')!
@@ -119,6 +124,21 @@ let currentFile: string | null = null
 let busy = false
 let writingPreviewTable = false
 
+const APP_WINDOW_TITLE = 'MarkFlow 文档转换工作台'
+
+function fileNameFromPath(path: string) {
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return separator >= 0 ? path.slice(separator + 1) : path
+}
+
+function setCurrentFile(path: string | null) {
+  currentFile = path
+  fileLabel.textContent = path ?? '未保存的草稿 · Markdown 源码'
+  const title = path ? fileNameFromPath(path) : APP_WINDOW_TITLE
+  document.title = title
+  if (isTauri()) void getCurrentWindow().setTitle(title).catch(() => undefined)
+}
+
 const STATE_KEY = 'exchangemd:lastState'
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -140,10 +160,7 @@ function restoreSession() {
     const saved = JSON.parse(localStorage.getItem(STATE_KEY) || 'null')
     if (saved && typeof saved.markdown === 'string' && saved.markdown.trim()) {
       setMarkdown(saved.markdown)
-      if (saved.currentFile) {
-        currentFile = saved.currentFile
-        fileLabel.textContent = currentFile
-      }
+      setCurrentFile(typeof saved.currentFile === 'string' ? saved.currentFile : null)
       return true
     }
   } catch {
@@ -263,6 +280,7 @@ const MAX_BACKGROUND_BYTES = 100 * 1024 * 1024
 function applyAppearance(settings: AppearanceSettings) {
   const root = document.documentElement
   const panelOpacity = settings.panelOpacity / 100
+  const codeBlockOpacity = settings.codeBlockOpacity / 100
   root.style.setProperty('--bg', settings.backgroundColor)
   root.style.setProperty('--background-opacity', String(settings.backgroundOpacity / 100))
   root.style.setProperty('--panel-opacity', String(panelOpacity))
@@ -271,6 +289,12 @@ function applyAppearance(settings: AppearanceSettings) {
   root.style.setProperty('--panel-reflection-opacity', String(panelOpacity * 0.19))
   root.style.setProperty('--panel-soft-opacity', String(panelOpacity * 0.06))
   root.style.setProperty('--panel-header-opacity', String(panelOpacity * 0.4))
+  root.style.setProperty('--code-block-opacity', String(codeBlockOpacity))
+  root.style.setProperty('--code-gutter-opacity', String(Math.max(0.08, codeBlockOpacity * 0.72)))
+  root.style.setProperty('--code-shadow-opacity', String(0.12 + codeBlockOpacity * 0.24))
+  root.style.setProperty('--code-border-opacity', String(0.14 + codeBlockOpacity * 0.28))
+  root.style.setProperty('--code-block-blur', settings.panelBlurEnabled ? '12px' : '0px')
+  root.classList.toggle('adaptive-contrast-enabled', settings.adaptiveContrastEnabled)
   root.style.setProperty('--content-highlight-opacity', String(panelOpacity * 0.21))
   root.style.setProperty('--content-reflection-opacity', String(panelOpacity * 0.13))
   root.style.setProperty('--content-soft-opacity', String(panelOpacity * 0.04))
@@ -281,8 +305,10 @@ function applyAppearance(settings: AppearanceSettings) {
   root.style.setProperty('--glass-highlight-opacity', String(0.08 + panelOpacity * 0.2))
   root.style.setProperty('--glass-primary-opacity', String(0.18 + panelOpacity * 0.4))
   root.style.setProperty('--glass-primary-hover-opacity', String(0.24 + panelOpacity * 0.46))
-  root.style.setProperty('--panel-blur', settings.panelBlurEnabled ? '18px' : '0px')
-  root.style.setProperty('--panel-header-blur', settings.panelBlurEnabled ? '12px' : '0px')
+  root.style.setProperty('--panel-blur', settings.panelBlurEnabled ? '28px' : '0px')
+  root.style.setProperty('--panel-header-blur', settings.panelBlurEnabled ? '16px' : '0px')
+  root.style.setProperty('--content-blur', settings.panelBlurEnabled ? '16px' : '0px')
+  root.style.setProperty('--glass-blur', settings.panelBlurEnabled ? '8px' : '0px')
   root.style.setProperty('--button-text', settings.buttonTextColor)
   root.style.setProperty('--editor-text', settings.editorColor)
   root.style.setProperty('--preview-text', settings.previewColor)
@@ -292,6 +318,10 @@ function applyAppearance(settings: AppearanceSettings) {
   backgroundOpacityValue.value = `${settings.backgroundOpacity}%`
   panelOpacityInput.value = String(settings.panelOpacity)
   panelOpacityValue.value = `${settings.panelOpacity}%`
+  codeBlockOpacityInput.value = String(settings.codeBlockOpacity)
+  codeBlockOpacityValue.value = `${settings.codeBlockOpacity}%`
+  adaptiveContrastToggle.setAttribute('aria-checked', String(settings.adaptiveContrastEnabled))
+  adaptiveContrastValue.textContent = settings.adaptiveContrastEnabled ? '开启' : '关闭'
   panelBlurToggle.setAttribute('aria-checked', String(settings.panelBlurEnabled))
   panelBlurValue.textContent = settings.panelBlurEnabled ? '开启' : '关闭'
   buttonTextColorInput.value = settings.buttonTextColor
@@ -312,6 +342,18 @@ function updateAppearance(patch: Partial<AppearanceSettings>) {
   } catch {
     // 设置体积很小；存储不可用时仍保留当前会话效果。
   }
+}
+
+function enableAdaptiveButtonLabels() {
+  document.querySelectorAll<HTMLButtonElement>('button').forEach((button) => {
+    for (const child of [...button.childNodes]) {
+      if (child.nodeType !== Node.TEXT_NODE || !child.textContent?.trim()) continue
+      const label = document.createElement('span')
+      label.className = 'adaptive-contrast'
+      label.textContent = child.textContent
+      button.replaceChild(label, child)
+    }
+  })
 }
 
 function backgroundKind(asset: Pick<StoredBackgroundAsset, 'name' | 'type'>): 'image' | 'video' | null {
@@ -984,8 +1026,7 @@ function formatJsonCodeBlock() {
 async function openMarkdown() {
   const picked = await pickOpenFile([{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }], 'text')
   if (!picked) return
-  currentFile = picked.filePath
-  fileLabel.textContent = currentFile
+  setCurrentFile(picked.filePath)
   setMarkdown(picked.text)
   setStatus(`已打开 ${currentFile}`)
   showToast('已打开文件', 'success')
@@ -996,8 +1037,7 @@ async function saveMarkdown() {
   if (!target) return
   try {
     await writeTextFile(target, markdown)
-    currentFile = target
-    fileLabel.textContent = currentFile
+    setCurrentFile(target)
     setStatus(`已保存到 ${target}`)
     showToast('已保存', 'success')
   } catch (err) {
@@ -1023,8 +1063,7 @@ async function convertOfficeToMarkdown(kind: 'docx' | 'xlsx') {
     const target = await pickSavePath(swapExtension(picked.filePath, '.md'), [{ name: 'Markdown', extensions: ['md'] }])
     if (!target) return
     await writeTextFile(target, md)
-    currentFile = target
-    fileLabel.textContent = target
+    setCurrentFile(target)
     setMarkdown(md)
     setStatus(`已把 ${label} 文件转换成 Markdown`)
     showToast(`已把 ${label} 转成 Markdown`, 'success')
@@ -1052,8 +1091,7 @@ async function exportHtml() {
     const html = buildHtmlDocument(picked.text, 'MarkFlow 导出文档')
     await writeTextFile(target, html)
     setMarkdown(picked.text)
-    currentFile = picked.filePath
-    fileLabel.textContent = picked.filePath
+    setCurrentFile(picked.filePath)
     setStatus(`已导出 HTML 到 ${target}`)
     showToast('已导出 HTML', 'success')
   } catch (err) {
@@ -1081,8 +1119,7 @@ async function exportDocx() {
     const bytes = new Uint8Array(await blob.arrayBuffer())
     await writeBytesFile(target, bytes)
     setMarkdown(picked.text)
-    currentFile = picked.filePath
-    fileLabel.textContent = picked.filePath
+    setCurrentFile(picked.filePath)
     setStatus(`已导出 Word 到 ${target}`)
     showToast('已导出 Word', 'success')
   } catch (err) {
@@ -1287,6 +1324,12 @@ backgroundOpacityInput.addEventListener('input', () => {
 })
 panelOpacityInput.addEventListener('input', () => {
   updateAppearance({ panelOpacity: Number(panelOpacityInput.value) })
+})
+codeBlockOpacityInput.addEventListener('input', () => {
+  updateAppearance({ codeBlockOpacity: Number(codeBlockOpacityInput.value) })
+})
+adaptiveContrastToggle.addEventListener('click', () => {
+  updateAppearance({ adaptiveContrastEnabled: !appearanceSettings.adaptiveContrastEnabled })
 })
 panelBlurToggle.addEventListener('click', () => {
   updateAppearance({ panelBlurEnabled: !appearanceSettings.panelBlurEnabled })
@@ -1511,8 +1554,7 @@ async function init() {
     const launchFile = await getLaunchFile()
     if (launchFile) {
       const text = await readTextFile(launchFile)
-      currentFile = launchFile
-      fileLabel.textContent = currentFile
+      setCurrentFile(launchFile)
       setMarkdown(text)
       setStatus(`已打开 ${currentFile}`)
       return
@@ -1525,6 +1567,7 @@ async function init() {
 }
 
 applyAppearance(appearanceSettings)
+enableAdaptiveButtonLabels()
 void restoreBackground()
 void init()
 setTimeout(() => void checkForUpdate(), 1200)

@@ -171,6 +171,29 @@
             </span>
           </label>
 
+          <label class="appearance-control appearance-range" for="code-block-opacity-input">
+            <span class="appearance-label">代码块背景不透明度</span>
+            <span class="range-wrap">
+              <input id="code-block-opacity-input" type="range" min="0" max="100" step="1" value="36" />
+              <output id="code-block-opacity-value" for="code-block-opacity-input">36%</output>
+            </span>
+          </label>
+
+          <div class="appearance-control">
+            <span id="adaptive-contrast-label" class="appearance-label">自动反色显示</span>
+            <button
+              type="button"
+              id="adaptive-contrast-toggle"
+              class="appearance-switch"
+              role="switch"
+              aria-checked="true"
+              aria-labelledby="adaptive-contrast-label adaptive-contrast-value"
+            >
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span id="adaptive-contrast-value" class="switch-value">开启</span>
+            </button>
+          </div>
+
           <div class="appearance-control">
             <span id="panel-blur-label" class="appearance-label">面板背景模糊</span>
             <button

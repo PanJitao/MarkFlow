@@ -415,10 +415,13 @@ textarea:focus-visible {
 #preview td[contenteditable='plaintext-only']:hover { background: rgba(255, 255, 255, 0.24); }
 #preview th[contenteditable='plaintext-only']:focus,
 #preview td[contenteditable='plaintext-only']:focus { outline: 2px solid var(--focus); outline-offset: -2px; background: rgba(255, 255, 255, 0.34); }
-#preview .table-edge { position: absolute; display: flex; z-index: 2; }
-#preview .table-row-edge { right: 18px; bottom: 0; left: 0; height: 18px; align-items: flex-end; justify-content: center; }
+#preview .table-edge { position: absolute; display: flex; gap: 6px; z-index: 2; }
+#preview .table-row-edge { right: 18px; bottom: 0; left: 0; height: 18px; align-items: center; justify-content: center; }
 #preview .table-column-edge { top: 0; right: 0; bottom: 18px; width: 18px; flex-direction: column; align-items: center; justify-content: center; }
 #preview .table-edge-btn {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
   width: 26px;
   min-width: 26px;
   height: 26px;
@@ -429,7 +432,7 @@ textarea:focus-visible {
   transform: scale(0.82);
   transition: opacity 150ms ease, transform 150ms ease;
 }
-#preview .table-edge-btn svg { width: 15px; height: 15px; }
+#preview .table-edge-btn svg { display: block; width: 15px; height: 15px; }
 #preview .table-edge:hover .table-edge-btn,
 #preview .table-edge-btn:focus-visible { opacity: 1; transform: scale(1); }
 #preview .table-edge:hover .table-edge-btn:disabled { opacity: 0.4; cursor: not-allowed; }

@@ -65,8 +65,8 @@ jobs:
           # Windows x64
           - { runner: windows-latest,  target: x86_64-pc-windows-msvc,  label: windows-x64, bundles: nsis }
           # macOS（Apple Silicon + Intel）
-          - { runner: macos-latest,    target: aarch64-apple-darwin,    label: macos-arm64, bundles: app,dmg }
-          - { runner: macos-latest,    target: x86_64-apple-darwin,     label: macos-x64, bundles: app,dmg }
+          - { runner: macos-latest,    target: aarch64-apple-darwin,    label: macos-arm64, bundles: dmg }
+          - { runner: macos-latest,    target: x86_64-apple-darwin,     label: macos-x64, bundles: dmg }
 
     steps:
       - uses: actions/checkout@v4

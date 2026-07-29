@@ -1,6 +1,6 @@
 [package]
 name = "markflow"
-version = "0.3.10"
+version = "0.3.11"
 description = "MarkFlow 文档转换工作台"
 authors = ["MarkFlow"]
 edition = "2021"

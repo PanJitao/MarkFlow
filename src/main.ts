@@ -225,7 +225,10 @@ async function checkForUpdate() {
     updateStatusEl.textContent = update.body || '确认后将下载并安装更新。'
     updateProgressEl.value = 0
     setUpdateControls(false)
-    if (!updateDialog.open) updateDialog.showModal()
+    if (!updateDialog.open) {
+      window.getSelection()?.removeAllRanges()
+      updateDialog.showModal()
+    }
   } catch (err) {
     console.warn('检查更新失败', err)
   }

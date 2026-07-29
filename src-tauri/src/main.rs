@@ -8,7 +8,7 @@ use std::process::Command;
 use tauri::ipc::Response;
 
 const PROG_ID: &str = "ExchangeMD.md";
-const APP_NAME: &str = "ExchangeMD.exe";
+const APP_NAME: &str = "MarkFlow.exe";
 const MD_EXTS: &[&str] = &[".md", ".markdown", ".mdown"];
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -122,7 +122,7 @@ fn open_default_apps_settings() -> Result<(), String> {
     }
 }
 
-/// 把 ExchangeMD 注册进 .md 的「打开方式」列表（仅 Windows；HKCU，无需管理员）
+/// 把 MarkFlow 注册进 .md 的「打开方式」列表（仅 Windows；HKCU，无需管理员）
 #[cfg(windows)]
 #[tauri::command]
 fn register_md_handler() -> Result<String, String> {
@@ -149,7 +149,7 @@ fn register_md_handler_windows() -> Result<String, String> {
     let base = format!("HKCU\\Software\\Classes\\{}", PROG_ID);
 
     // 1) ProgID 基本信息
-    reg_add(&["add", &base, "/ve", "/d", "ExchangeMD Markdown 文档", "/f"])?;
+    reg_add(&["add", &base, "/ve", "/d", "MarkFlow Markdown 文档", "/f"])?;
     reg_add(&["add", &format!("{}\\DefaultIcon", base), "/ve", "/d", &icon, "/f"])?;
     reg_add(&[
         "add",
@@ -221,5 +221,5 @@ fn main() {
             open_url,
         ])
         .run(tauri::generate_context!())
-        .expect("运行 ExchangeMD 时出错");
+        .expect("运行 MarkFlow 时出错");
 }

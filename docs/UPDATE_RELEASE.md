@@ -1,12 +1,14 @@
 # Online Update Release
 
-ExchangeMD uses the official Tauri updater from version `0.3.5`. The installed app checks this URL on startup:
+MarkFlow uses the official Tauri updater from version `0.3.5`. The installed app checks this URL on startup:
 
 `https://github.com/PanJitao/word-to-markdown/releases/latest/download/latest.json`
 
 Only publish a newer version after its NSIS updater package has been signed. The private key is local-only and must not be committed:
 
 `C:\Users\wuhu\.exchangemd\updater.key`
+
+The key folder keeps its original name so existing installations can continue updating after the product rename.
 
 ## Build
 
@@ -32,7 +34,7 @@ Create `latest.json` from the generated NSIS installer signature, then upload it
   "platforms": {
     "windows-x86_64": {
       "signature": "CONTENTS_OF_THE_NSIS_SIG_FILE",
-      "url": "https://github.com/PanJitao/word-to-markdown/releases/download/v0.3.5/ExchangeMD_0.3.5_x64-setup.exe"
+      "url": "https://github.com/PanJitao/word-to-markdown/releases/download/v0.3.5/MarkFlow_0.3.5_x64-setup.exe"
     }
   }
 }

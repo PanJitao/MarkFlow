@@ -10,8 +10,10 @@ src-tauri/gen/
 
 # 打包出的二进制 / 压缩包（体积大，不入库，由构建生成）
 *.exe
-ExchangeMD.exe
+MarkFlow.exe
+MarkFlow-rebuild-source.zip
 ExchangeMD-rebuild-source.zip
+output/
 
 # 本地环境与编辑器
 .DS_Store

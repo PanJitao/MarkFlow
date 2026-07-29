@@ -50,7 +50,7 @@ hljs.registerLanguage('powershell', powershell)
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('sql', sql)
 
-const SAMPLE = `# 欢迎使用 ExchangeMD
+const SAMPLE = `# 欢迎使用 MarkFlow
 
 一个轻量桌面小工具，可以完成 **Markdown、Word、Excel、HTML** 之间的互相转换。
 
@@ -1049,7 +1049,7 @@ async function exportHtml() {
   if (!target) return
   setBusy(true, '正在导出 HTML…')
   try {
-    const html = buildHtmlDocument(picked.text, 'ExchangeMD 导出文档')
+    const html = buildHtmlDocument(picked.text, 'MarkFlow 导出文档')
     await writeTextFile(target, html)
     setMarkdown(picked.text)
     currentFile = picked.filePath
@@ -1379,8 +1379,8 @@ document.querySelectorAll<HTMLButtonElement>('[data-setting]').forEach((btn) => 
       } else if (action === 'default-app') {
         await registerMdHandler()
         await openDefaultAppsSettings()
-        showToast('已打开系统设置，请在 .md 中选择 ExchangeMD', 'info')
-        setStatus('请在系统「默认应用」里把 .md 设为 ExchangeMD')
+        showToast('已打开系统设置，请在 .md 中选择 MarkFlow', 'info')
+        setStatus('请在系统「默认应用」里把 .md 设为 MarkFlow')
       }
     } catch (err) {
       showToast(`操作失败：${errMsg(err)}`, 'error')

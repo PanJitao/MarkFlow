@@ -1,19 +1,19 @@
 <div align="center">
 
-<img src="app-icon.png" width="96" alt="ExchangeMD logo" />
+<img src="app-icon.png" width="96" alt="MarkFlow logo" />
 
-# ExchangeMD
+# MarkFlow
 
 本地优先的 Markdown 文档转换与编辑工作台
 
 Markdown、Word、Excel、HTML 的转换、编辑和预览都在一个桌面应用中完成。
 
-[![Version](https://img.shields.io/badge/version-0.3.4-1f7a8c.svg)](https://github.com/PanJitao/word-to-markdown/releases/tag/Version_6)
+[![Version](https://img.shields.io/badge/version-0.3.10-1f7a8c.svg)](https://github.com/PanJitao/word-to-markdown/releases/latest)
 ![Tauri](https://img.shields.io/badge/desktop-Tauri%20v2-24c8db.svg)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3a6ea5.svg)
 [![License](https://img.shields.io/badge/license-MIT-4c956c.svg)](LICENSE)
 
-[下载 Version_6](https://github.com/PanJitao/word-to-markdown/releases/tag/Version_6) · [核心功能](#核心功能) · [使用方式](#使用方式) · [自行构建](#自行构建)
+[下载最新版本](https://github.com/PanJitao/word-to-markdown/releases/latest) · [核心功能](#核心功能) · [使用方式](#使用方式) · [自行构建](#自行构建)
 
 </div>
 
@@ -21,9 +21,9 @@ Markdown、Word、Excel、HTML 的转换、编辑和预览都在一个桌面应�
 
 ## 项目简介
 
-ExchangeMD 是一款面向日常写作、文档整理和格式转换的桌面工具。它提供 Markdown 源码编辑与实时预览，支持将 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word 或独立 HTML。
+MarkFlow 是一款面向日常写作、文档整理和格式转换的桌面工具。它提供 Markdown 源码编辑与实时预览，支持将 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word 或独立 HTML。
 
-当前版本为 `0.3.4`，对应 GitHub Release `Version_6`。文档转换、预览和外观设置均在本机运行，文件不会上传到服务端。
+当前源码版本为 `0.3.10`。文档转换、预览和外观设置均在本机运行，文件不会上传到服务端。
 
 ## 核心功能
 
@@ -72,7 +72,7 @@ ExchangeMD 是一款面向日常写作、文档整理和格式转换的桌面工
 ### 桌面集成
 
 - 自动恢复上次编辑内容和文件名。
-- 可将 ExchangeMD 加入 `.md` 文件右键“打开方式”。
+- 可将 MarkFlow 加入 `.md` 文件右键“打开方式”。
 - 可注册为 Markdown 默认应用，并跳转至 Windows 系统设置确认默认程序。
 - 双击 `.md` 文件或通过右键菜单打开时，文件会直接载入编辑区。
 
@@ -80,7 +80,7 @@ ExchangeMD 是一款面向日常写作、文档整理和格式转换的桌面工
 
 ### 编辑与实时预览
 
-![ExchangeMD 主界面](docs/screenshots/01-main.png)
+![MarkFlow 主界面](docs/screenshots/01-main.png)
 
 ### Word 转 Markdown
 
@@ -92,14 +92,14 @@ ExchangeMD 是一款面向日常写作、文档整理和格式转换的桌面工
 
 ## 下载与使用
 
-前往 [Version_6 Release](https://github.com/PanJitao/word-to-markdown/releases/tag/Version_6) 下载对应平台的安装包。
+前往 [GitHub Releases](https://github.com/PanJitao/word-to-markdown/releases/latest) 下载对应平台的安装包。
 
-| 平台 | 文件 | 直接下载 |
-| --- | --- | --- |
-| Windows x64 | NSIS 安装程序 | [ExchangeMD_0.3.4_x64-setup.exe](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_x64-setup.exe) |
-| Windows x64 | MSI 安装包 | [ExchangeMD_0.3.4_x64_en-US.msi](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_x64_en-US.msi) |
-| macOS Apple Silicon | DMG | [ExchangeMD_0.3.4_aarch64.dmg](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_aarch64.dmg) |
-| macOS Intel | DMG | [ExchangeMD_0.3.4_x64.dmg](https://github.com/PanJitao/word-to-markdown/releases/download/Version_6/ExchangeMD_0.3.4_x64.dmg) |
+| 平台 | 文件名格式 |
+| --- | --- |
+| Windows x64 | `MarkFlow_<version>_x64-setup.exe` |
+| Windows x64 | `MarkFlow_<version>_x64_en-US.msi` |
+| macOS Apple Silicon | `MarkFlow_<version>_aarch64.dmg` |
+| macOS Intel | `MarkFlow_<version>_x64.dmg` |
 
 Windows 10/11 通常已内置 WebView2。少数旧系统如缺少该运行时，可从 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) 安装。
 
@@ -166,7 +166,7 @@ npm run tauri -- build --bundles nsis
 Windows NSIS 安装程序输出至：
 
 ```text
-src-tauri/target/release/bundle/nsis/ExchangeMD_0.3.4_x64-setup.exe
+src-tauri/target/release/bundle/nsis/MarkFlow_0.3.10_x64-setup.exe
 ```
 
 ## 项目结构

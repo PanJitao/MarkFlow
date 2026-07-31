@@ -123,6 +123,8 @@ let markdown = SAMPLE
 let currentFile: string | null = null
 let busy = false
 let writingPreviewTable = false
+const undoStack: Array<{ value: string; start: number; end: number }> = []
+const MAX_UNDO_STEPS = 100
 
 const APP_WINDOW_TITLE = 'MarkFlow 文档转换工作台'
 
@@ -277,10 +279,20 @@ updateConfirmBtn.addEventListener('click', async () => {
 
 const MAX_BACKGROUND_BYTES = 100 * 1024 * 1024
 
+function adaptiveTextColor(background: string): string {
+  const red = parseInt(background.slice(1, 3), 16) / 255
+  const green = parseInt(background.slice(3, 5), 16) / 255
+  const blue = parseInt(background.slice(5, 7), 16) / 255
+  const linear = (value: number) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  const luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+  return luminance > 0.42 ? '#20262e' : '#ffffff'
+}
+
 function applyAppearance(settings: AppearanceSettings) {
   const root = document.documentElement
   const panelOpacity = settings.panelOpacity / 100
   const codeBlockOpacity = settings.codeBlockOpacity / 100
+  const contrastText = adaptiveTextColor(settings.backgroundColor)
   root.style.setProperty('--bg', settings.backgroundColor)
   root.style.setProperty('--background-opacity', String(settings.backgroundOpacity / 100))
   root.style.setProperty('--panel-opacity', String(panelOpacity))
@@ -309,7 +321,8 @@ function applyAppearance(settings: AppearanceSettings) {
   root.style.setProperty('--panel-header-blur', settings.panelBlurEnabled ? '16px' : '0px')
   root.style.setProperty('--content-blur', settings.panelBlurEnabled ? '16px' : '0px')
   root.style.setProperty('--glass-blur', settings.panelBlurEnabled ? '8px' : '0px')
-  root.style.setProperty('--button-text', settings.buttonTextColor)
+  root.style.setProperty('--adaptive-text', contrastText)
+  root.style.setProperty('--button-text', settings.adaptiveContrastEnabled ? contrastText : settings.buttonTextColor)
   root.style.setProperty('--editor-text', settings.editorColor)
   root.style.setProperty('--preview-text', settings.previewColor)
 
@@ -442,6 +455,7 @@ function setContentZoom(nextZoom: number) {
 }
 
 function setMarkdown(value: string) {
+  undoStack.length = 0
   markdown = value
   editor.value = value
   renderPreview(value)
@@ -454,6 +468,28 @@ function renderOnly() {
   markdown = editor.value
   updateCount()
   schedulePersist()
+}
+
+function recordUndoState() {
+  const value = editor.value
+  if (undoStack.at(-1)?.value === value) return
+  undoStack.push({
+    value,
+    start: editor.selectionStart ?? value.length,
+    end: editor.selectionEnd ?? value.length,
+  })
+  if (undoStack.length > MAX_UNDO_STEPS) undoStack.shift()
+}
+
+function undoMarkdown() {
+  const previous = undoStack.pop()
+  if (!previous) return false
+  editor.value = previous.value
+  markdown = previous.value
+  editor.setSelectionRange(previous.start, previous.end)
+  renderOnly()
+  showToast('已撤回', 'info')
+  return true
 }
 
 const JSON_TOKEN = /"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b/g
@@ -699,6 +735,8 @@ function writeMarkdownTable(tableIndex: number, mutate: (rows: string[][], divid
     const nextTable = [format(rows[0]), format(divider), ...rows.slice(1).map(format)]
     lines.splice(table.start, table.end - table.start + 1, ...nextTable)
     const next = lines.join('\n')
+    if (next === editor.value) return
+    recordUndoState()
     editor.value = next
     markdown = next
     renderPreview(next)
@@ -807,6 +845,8 @@ function getSelection() {
 }
 
 function applyEdit(next: string, start: number, end: number) {
+  if (next === editor.value) return
+  recordUndoState()
   editor.value = next
   markdown = next
   editor.focus()
@@ -876,6 +916,49 @@ function outdentSelection() {
   const outdented = block.split('\n').map((l) => l.replace(/^ {1,2}/, '')).join('\n')
   const next = text.slice(0, lineStart) + outdented + text.slice(lineEnd)
   applyEdit(next, lineStart, lineStart + outdented.length)
+}
+
+function continueMarkdownStructure(): boolean {
+  const { text, start, end } = getSelection()
+  if (start !== end) return false
+
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1
+  const nextLine = text.indexOf('\n', start)
+  const lineEnd = nextLine === -1 ? text.length : nextLine
+  const lineBeforeCaret = text.slice(lineStart, start)
+  const fullLine = text.slice(lineStart, lineEnd)
+  const emptyList = fullLine.match(/^(\s*)(?:[-+*]|\d+[.)])\s*$/)
+  const emptyQuote = fullLine.match(/^(\s*)(?:>\s*)+$/)
+
+  if (emptyList || emptyQuote) {
+    const indent = (emptyList ?? emptyQuote)![1]
+    const next = text.slice(0, lineStart) + indent + text.slice(lineEnd)
+    applyEdit(next, lineStart + indent.length, lineStart + indent.length)
+    return true
+  }
+
+  const list = lineBeforeCaret.match(/^(\s*)([-+*]|\d+[.)])\s+/)
+  if (list) {
+    const [, indent, marker] = list
+    const nextMarker = /^\d+[.)]$/.test(marker)
+      ? `${Number.parseInt(marker, 10) + 1}${marker.at(-1)} `
+      : `${marker} `
+    const next = text.slice(0, start) + `\n${indent}${nextMarker}` + text.slice(start)
+    const caret = start + indent.length + nextMarker.length + 1
+    applyEdit(next, caret, caret)
+    return true
+  }
+
+  const quote = lineBeforeCaret.match(/^(\s*(?:>\s*)+)/)
+  if (quote) {
+    const prefix = quote[1].endsWith(' ') ? quote[1] : `${quote[1]} `
+    const next = text.slice(0, start) + `\n${prefix}` + text.slice(start)
+    const caret = start + prefix.length + 1
+    applyEdit(next, caret, caret)
+    return true
+  }
+
+  return false
 }
 
 
@@ -1152,6 +1235,9 @@ document.querySelectorAll<HTMLButtonElement>('[data-file]').forEach((btn) => {
   })
 })
 
+editor.addEventListener('beforeinput', (event) => {
+  if (!event.inputType.startsWith('history')) recordUndoState()
+})
 editor.addEventListener('input', () => {
   lastNonEmptySelection = null
   renderOnly()
@@ -1252,6 +1338,10 @@ document.addEventListener('auxclick', (e) => {
 }, true)
 
 editor.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && continueMarkdownStructure()) {
+    e.preventDefault()
+    return
+  }
   // Tab 不带 Ctrl/Meta，必须单独、优先处理，否则会被默认行为（跳走焦点）吃掉
   if (e.key === 'Tab') {
     e.preventDefault()
@@ -1266,6 +1356,10 @@ editor.addEventListener('keydown', (e) => {
 })
 
 document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && undoMarkdown()) {
+    e.preventDefault()
+    return
+  }
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return
   const zoomIn = e.key === '+' || e.key === '=' || e.code === 'NumpadAdd'
   const zoomOut = e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract'
@@ -1285,6 +1379,25 @@ window.addEventListener('wheel', (e) => {
   lastWheelZoomAt = now
   setContentZoom(contentZoom + (e.deltaY < 0 ? CONTENT_ZOOM_STEP : -CONTENT_ZOOM_STEP))
 }, { passive: false })
+
+// ---------- 顶栏下拉菜单 ----------
+
+const conversionBtn = document.querySelector<HTMLButtonElement>('#conversion-btn')!
+const conversionMenu = document.querySelector<HTMLElement>('#conversion-menu')!
+
+function isConversionMenuOpen() {
+  return conversionMenu.classList.contains('open')
+}
+function toggleConversionMenu(open: boolean) {
+  conversionMenu.classList.toggle('open', open)
+  conversionBtn.setAttribute('aria-expanded', String(open))
+}
+
+conversionBtn.addEventListener('click', (event) => {
+  event.stopPropagation()
+  toggleConversionMenu(!isConversionMenuOpen())
+})
+conversionMenu.addEventListener('click', () => toggleConversionMenu(false))
 
 // ---------- 设置菜单：文件关联 / 设为默认 ----------
 
@@ -1400,12 +1513,19 @@ document.addEventListener('visibilitychange', () => {
 })
 
 // 点击菜单外部收起
-document.addEventListener('click', () => toggleSettingsMenu(false))
+document.addEventListener('click', () => {
+  toggleSettingsMenu(false)
+  toggleConversionMenu(false)
+})
 // ESC 收起
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isMenuOpen()) {
     toggleSettingsMenu(false)
     settingsBtn.focus()
+  }
+  if (e.key === 'Escape' && isConversionMenuOpen()) {
+    toggleConversionMenu(false)
+    conversionBtn.focus()
   }
 })
 
@@ -1417,8 +1537,8 @@ document.querySelectorAll<HTMLButtonElement>('[data-setting]').forEach((btn) => 
     try {
       if (action === 'open-with') {
         await registerMdHandler()
-        showToast('已加入右键「打开方式」', 'success')
-        setStatus('已注册到 .md 打开方式列表')
+        showToast('已启用 Markdown 打开方式与新建菜单', 'success')
+        setStatus('已注册 .md 打开方式和「新建」菜单')
       } else if (action === 'default-app') {
         await registerMdHandler()
         await openDefaultAppsSettings()
@@ -1432,17 +1552,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-setting]').forEach((btn) => 
       setBusy(false)
     }
   })
-})
-
-// ---------- 复制按钮 ----------
-
-document.querySelector<HTMLElement>('#copy-btn')!.addEventListener('click', async () => {
-  try {
-    await navigator.clipboard.writeText(editor.value)
-    showToast('已复制 Markdown 源码', 'success')
-  } catch (err) {
-    showToast(`复制失败：${errMsg(err)}`, 'error')
-  }
 })
 
 preview.addEventListener('click', async (e) => {

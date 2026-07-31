@@ -18,6 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 // Windows：用 ShellExecuteW（无 cmd 黑框、无引号转义问题）
 #[cfg(windows)]
 mod platform {
+    use std::ffi::c_void;
     use std::ffi::OsStr;
     use std::iter;
     use std::os::windows::ffi::OsStrExt;
@@ -32,6 +33,7 @@ mod platform {
             dir: *const u16,
             show: i32,
         ) -> isize;
+        fn SHChangeNotify(event_id: u32, flags: u32, item1: *const c_void, item2: *const c_void);
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -50,6 +52,10 @@ mod platform {
             Ok(())
         }
     }
+
+    pub(crate) fn notify_association_changed() {
+        unsafe { SHChangeNotify(0x0800_0000, 0, std::ptr::null(), std::ptr::null()) }
+    }
 }
 
 // macOS / Linux：用系统命令打开
@@ -65,9 +71,11 @@ mod platform {
             Err(e) => Err(format!("无法打开：{e}")),
         }
     }
+
+    pub(crate) fn notify_association_changed() {}
 }
 
-use platform::shell_open;
+use platform::{notify_association_changed, shell_open};
 
 // ---------- 文件读写（跨平台） ----------
 
@@ -187,7 +195,53 @@ fn register_md_handler_windows() -> Result<String, String> {
         ])?;
     }
 
-    Ok(format!("已注册到打开方式列表（程序：{}）", exe))
+    // 3) 标准「新建」子菜单：创建空白 Markdown 文件，不覆盖现有关联程序。
+    let markdown_extension = "HKCU\\Software\\Classes\\.md";
+    reg_add(&[
+        "add",
+        markdown_extension,
+        "/ve",
+        "/d",
+        PROG_ID,
+        "/f",
+    ])?;
+    let shell_new = "HKCU\\Software\\Classes\\.md\\ShellNew";
+    reg_add(&[
+        "add",
+        shell_new,
+        "/v",
+        "NullFile",
+        "/t",
+        "REG_SZ",
+        "/d",
+        "",
+        "/f",
+    ])?;
+    reg_add(&[
+        "add",
+        shell_new,
+        "/v",
+        "ItemName",
+        "/t",
+        "REG_SZ",
+        "/d",
+        "Markdown 文档",
+        "/f",
+    ])?;
+
+    // 清理旧版添加的独立右键命令，避免与「新建」菜单重复。
+    for key in [
+        "HKCU\\Software\\Classes\\Directory\\Background\\shell\\MarkFlowNewMarkdown",
+        "HKCU\\Software\\Classes\\Directory\\shell\\MarkFlowNewMarkdown",
+    ] {
+        let _ = Command::new("reg")
+            .creation_flags(CREATE_NO_WINDOW)
+            .args(["delete", key, "/f"])
+            .output();
+    }
+    notify_association_changed();
+
+    Ok(format!("已注册 Markdown 打开方式和「新建」菜单（程序：{}）", exe))
 }
 
 #[cfg(windows)]

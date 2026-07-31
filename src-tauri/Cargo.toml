@@ -1,6 +1,6 @@
 [package]
 name = "markflow"
-version = "0.3.15"
+version = "0.3.16"
 description = "MarkFlow 文档转换工作台"
 authors = ["MarkFlow"]
 edition = "2021"
@@ -13,6 +13,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+pathdiff = "0.2"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 

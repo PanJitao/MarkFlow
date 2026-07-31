@@ -29,15 +29,25 @@ import {
 } from './lib/appearance'
 import {
   pickOpenFile,
+  pickFilePath,
+  pickOpenFolder,
   pickSavePath,
   writeTextFile,
   writeBytesFile,
   readTextFile,
+  readFileBytes,
   swapExtension,
   getLaunchFile,
   registerMdHandler,
   openDefaultAppsSettings,
   openUrl,
+  readDirectory,
+  createWorkspaceFile,
+  createWorkspaceFolder,
+  relativePath,
+  resolveRelativePath,
+  newWindow,
+  type DirectoryEntry,
 } from './lib/io'
 
 hljs.registerLanguage('c', c)
@@ -68,7 +78,7 @@ const SAMPLE = `# 欢迎使用 MarkFlow
 2. 右边会立刻显示排版后的样子
 3. 想转换文件时，点顶部按钮选择文件即可
 
-> 提示：支持 **Ctrl+B** 加粗、**Ctrl+I** 斜体。
+> 提示：支持 **Ctrl+I** 斜体。
 `
 
 const editor = document.querySelector<HTMLTextAreaElement>('#editor')!
@@ -110,6 +120,13 @@ const previewColorInput = document.querySelector<HTMLInputElement>('#preview-col
 const resetAppearanceBtn = document.querySelector<HTMLButtonElement>('#reset-appearance-btn')!
 const editorContextMenu = document.querySelector<HTMLElement>('#editor-context-menu')!
 const contextSubmenuTriggers = [...editorContextMenu.querySelectorAll<HTMLButtonElement>('[data-context-submenu]')]
+const fileTree = document.querySelector<HTMLElement>('#file-tree')!
+const workspaceLabel = document.querySelector<HTMLElement>('#workspace-label')!
+const fileTreeToggleBtn = document.querySelector<HTMLButtonElement>('#file-tree-toggle-btn')!
+const fileBtn = document.querySelector<HTMLButtonElement>('#file-btn')!
+const fileMenu = document.querySelector<HTMLElement>('#file-menu')!
+const recentFilesBtn = document.querySelector<HTMLButtonElement>('#recent-files-btn')!
+const recentFilesList = document.querySelector<HTMLElement>('#recent-files-list')!
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 let appearanceSettings = loadAppearanceSettings()
 let backgroundObjectUrl: string | null = null
@@ -121,16 +138,41 @@ let updateInstalling = false
 
 let markdown = SAMPLE
 let currentFile: string | null = null
+let workspaceRoot: string | null = null
+const previewImageObjectUrls = new Set<string>()
+const expandedTreeDirectories = new Set<string>()
 let busy = false
 let writingPreviewTable = false
 const undoStack: Array<{ value: string; start: number; end: number }> = []
 const MAX_UNDO_STEPS = 100
 
 const APP_WINDOW_TITLE = 'MarkFlow 文档转换工作台'
+const RECENT_FOLDERS_KEY = 'markflow:recentFolders'
+const MAX_RECENT_FOLDERS = 10
 
 function fileNameFromPath(path: string) {
   const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   return separator >= 0 ? path.slice(separator + 1) : path
+}
+
+function parentDirectoryFromPath(path: string) {
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return separator >= 0 ? path.slice(0, separator) : ''
+}
+
+function loadRecentFolders(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_FOLDERS_KEY) || '[]')
+    return Array.isArray(value) ? value.filter((path): path is string => typeof path === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function rememberRecentFolder(path: string) {
+  const recent = [path, ...loadRecentFolders().filter((item) => item !== path)].slice(0, MAX_RECENT_FOLDERS)
+  localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(recent))
+  renderRecentFolderList()
 }
 
 function setCurrentFile(path: string | null) {
@@ -632,7 +674,40 @@ function setCodeCopyButtonState(button: HTMLButtonElement, copied = false) {
   button.setAttribute('aria-label', copied ? '已复制代码' : '复制代码')
 }
 
+function isRelativeImageSource(source: string) {
+  return source.length > 0 && !/^(?:[a-z]+:|\/|#)/i.test(source)
+}
+
+function imageMimeType(source: string) {
+  const extension = source.split('?')[0].split('.').at(-1)?.toLowerCase()
+  return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml' } as Record<string, string>)[extension || ''] || 'application/octet-stream'
+}
+
+async function resolvePreviewImages() {
+  if (!isTauri() || !currentFile) return
+  const images = [...preview.querySelectorAll<HTMLImageElement>('img[src]')]
+  for (const image of images) {
+    const source = image.getAttribute('src') || ''
+    if (!isRelativeImageSource(source)) continue
+    try {
+      const path = await resolveRelativePath(currentFile, decodeURIComponent(source))
+      const bytes = await readFileBytes(path)
+      const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: imageMimeType(source) }))
+      if (preview.contains(image)) {
+        image.src = url
+        previewImageObjectUrls.add(url)
+      } else {
+        URL.revokeObjectURL(url)
+      }
+    } catch {
+      // 路径无效时保留原始 Markdown 地址，让浏览器显示加载失败状态。
+    }
+  }
+}
+
 function renderPreview(value: string) {
+  previewImageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+  previewImageObjectUrls.clear()
   preview.innerHTML = renderMarkdown(value)
   preview.querySelectorAll<HTMLTableElement>('table').forEach((table, index) => {
     enhancePreviewTable(table, index)
@@ -650,6 +725,7 @@ function renderPreview(value: string) {
     pre.before(wrapper)
     wrapper.append(pre, button)
   })
+  void resolvePreviewImages()
 }
 
 interface MarkdownTableSource {
@@ -1106,13 +1182,155 @@ function formatJsonCodeBlock() {
 
 // ---------- 文件操作 ----------
 
+function isMarkdownPath(path: string) {
+  return /\.(md|markdown|mdown|txt)$/i.test(path)
+}
+
+function isImagePath(path: string) {
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(path)
+}
+
+function imageAltFromPath(path: string) {
+  return fileNameFromPath(path).replace(/\.[^.]+$/, '') || '图片'
+}
+
+function markdownImagePath(path: string) {
+  return /[\s()]/.test(path) ? `<${path}>` : path
+}
+
+async function openMarkdownPath(path: string) {
+  const text = await readTextFile(path)
+  setCurrentFile(path)
+  setMarkdown(text)
+  if (!workspaceRoot) {
+    workspaceRoot = parentDirectoryFromPath(path)
+    rememberRecentFolder(workspaceRoot)
+    await renderWorkspaceTree()
+  } else {
+    renderWorkspaceTree()
+  }
+  setStatus(`已打开 ${path}`)
+}
+
+async function openWorkspaceFolder() {
+  const folder = await pickOpenFolder()
+  if (!folder) return
+  workspaceRoot = folder
+  rememberRecentFolder(folder)
+  expandedTreeDirectories.clear()
+  expandedTreeDirectories.add(folder)
+  workspaceLabel.textContent = fileNameFromPath(folder) || folder
+  workspaceLabel.title = folder
+  await renderWorkspaceTree()
+  setStatus(`已打开文件夹 ${folder}`)
+}
+
+async function renderWorkspaceTree() {
+  if (!workspaceRoot) {
+    workspaceLabel.textContent = '文件'
+    workspaceLabel.title = '未打开文件夹'
+    fileTree.replaceChildren()
+    return
+  }
+
+  workspaceLabel.textContent = fileNameFromPath(workspaceRoot) || workspaceRoot
+  workspaceLabel.title = workspaceRoot
+  const fragment = document.createDocumentFragment()
+  try {
+    await appendTreeEntries(fragment, workspaceRoot, 0)
+    fileTree.replaceChildren(fragment)
+  } catch (error) {
+    fileTree.replaceChildren(Object.assign(document.createElement('p'), {
+      className: 'file-tree-empty',
+      textContent: `无法读取文件夹：${errMsg(error)}`,
+    }))
+  }
+}
+
+async function appendTreeEntries(container: DocumentFragment | HTMLElement, folder: string, depth: number): Promise<void> {
+  const entries = await readDirectory(folder)
+  for (const entry of entries) {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'file-tree-row'
+    row.style.setProperty('--tree-indent', `${depth * 16}px`)
+    row.dataset.path = entry.path
+    row.dataset.kind = entry.is_dir ? 'directory' : isImagePath(entry.path) ? 'image' : isMarkdownPath(entry.path) ? 'markdown' : 'file'
+    row.title = entry.path
+
+    const icon = document.createElement('span')
+    icon.className = 'file-tree-icon'
+    icon.textContent = entry.is_dir ? (expandedTreeDirectories.has(entry.path) ? '▾' : '▸') : isImagePath(entry.path) ? '▧' : '·'
+    const label = document.createElement('span')
+    label.className = 'file-tree-name'
+    label.textContent = entry.name
+    row.append(icon, label)
+    container.append(row)
+
+    if (entry.is_dir && expandedTreeDirectories.has(entry.path)) {
+      await appendTreeEntries(container, entry.path, depth + 1)
+    }
+  }
+}
+
+async function insertImageFromPath(path: string) {
+  if (!currentFile) {
+    showToast('请先保存当前 Markdown 文件，再插入相对路径图片', 'info')
+    return
+  }
+  const relative = await relativePath(currentFile, path)
+  insertBlock(`![${imageAltFromPath(path)}](${markdownImagePath(relative)})`)
+  showToast('已插入相对路径图片', 'success')
+}
+
+async function insertImage() {
+  const path = await pickFilePath([{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }])
+  if (!path) return
+  await insertImageFromPath(path)
+}
+
+async function newWorkspaceFile() {
+  const parent = workspaceRoot || (currentFile ? parentDirectoryFromPath(currentFile) : null)
+  if (!parent) {
+    showToast('请先打开文件夹', 'info')
+    return
+  }
+  const requested = prompt('请输入文件名', '新建文档.md')?.trim()
+  if (!requested) return
+  const name = /\.md$/i.test(requested) ? requested : `${requested}.md`
+  const path = await createWorkspaceFile(parent, name)
+  workspaceRoot ??= parent
+  expandedTreeDirectories.add(parent)
+  await renderWorkspaceTree()
+  await openMarkdownPath(path)
+}
+
+async function newWorkspaceFolder() {
+  const parent = workspaceRoot || (currentFile ? parentDirectoryFromPath(currentFile) : null)
+  if (!parent) {
+    showToast('请先打开文件夹', 'info')
+    return
+  }
+  const name = prompt('请输入文件夹名', '新建文件夹')?.trim()
+  if (!name) return
+  await createWorkspaceFolder(parent, name)
+  workspaceRoot ??= parent
+  expandedTreeDirectories.add(parent)
+  await renderWorkspaceTree()
+  showToast('已新建文件夹', 'success')
+}
+
 async function openMarkdown() {
   const picked = await pickOpenFile([{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }], 'text')
   if (!picked) return
   setCurrentFile(picked.filePath)
   setMarkdown(picked.text)
-  setStatus(`已打开 ${currentFile}`)
-  showToast('已打开文件', 'success')
+  workspaceRoot = parentDirectoryFromPath(picked.filePath)
+  expandedTreeDirectories.clear()
+  expandedTreeDirectories.add(workspaceRoot)
+  rememberRecentFolder(workspaceRoot)
+  await renderWorkspaceTree()
+  setStatus(`已打开 ${picked.filePath}`)
 }
 
 async function saveMarkdown() {
@@ -1121,11 +1339,36 @@ async function saveMarkdown() {
   try {
     await writeTextFile(target, markdown)
     setCurrentFile(target)
+    if (!workspaceRoot) {
+      workspaceRoot = parentDirectoryFromPath(target)
+      rememberRecentFolder(workspaceRoot)
+      await renderWorkspaceTree()
+    } else {
+      void renderWorkspaceTree()
+    }
     setStatus(`已保存到 ${target}`)
     showToast('已保存', 'success')
   } catch (err) {
     setStatus(`保存失败：${errMsg(err)}`)
     showToast(`保存失败：${errMsg(err)}`, 'error')
+  }
+}
+
+async function saveMarkdownAs() {
+  const target = await pickSavePath(currentFile ? fileNameFromPath(currentFile) : '文档.md', [{ name: 'Markdown', extensions: ['md'] }])
+  if (!target) return
+  try {
+    await writeTextFile(target, markdown)
+    setCurrentFile(target)
+    if (!workspaceRoot) {
+      workspaceRoot = parentDirectoryFromPath(target)
+      rememberRecentFolder(workspaceRoot)
+    }
+    await renderWorkspaceTree()
+    setStatus(`已另存为 ${target}`)
+    showToast('已另存为', 'success')
+  } catch (err) {
+    showToast(`另存失败：${errMsg(err)}`, 'error')
   }
 }
 
@@ -1226,13 +1469,37 @@ document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((btn) => {
 document.querySelectorAll<HTMLButtonElement>('[data-file]').forEach((btn) => {
   const type = btn.dataset.file!
   btn.addEventListener('click', () => {
-    if (type === 'open-md') return openMarkdown()
-    if (type === 'save-md') return saveMarkdown()
-    if (type === 'docx-to-md') return convertOfficeToMarkdown('docx')
-    if (type === 'xlsx-to-md') return convertOfficeToMarkdown('xlsx')
-    if (type === 'md-to-docx') return exportDocx()
-    if (type === 'export-html') return exportHtml()
+    const action = type === 'new-file' ? newWorkspaceFile
+      : type === 'new-folder' ? newWorkspaceFolder
+      : type === 'new-window' ? newWindow
+      : type === 'open-md' ? openMarkdown
+      : type === 'open-folder' ? openWorkspaceFolder
+      : type === 'save-md' ? saveMarkdown
+      : type === 'save-as' ? saveMarkdownAs
+      : type === 'docx-to-md' ? () => convertOfficeToMarkdown('docx')
+      : type === 'xlsx-to-md' ? () => convertOfficeToMarkdown('xlsx')
+      : type === 'md-to-docx' ? exportDocx
+      : type === 'export-html' ? exportHtml
+      : null
+    if (action) void action().catch((error) => showToast(`操作失败：${errMsg(error)}`, 'error'))
   })
+})
+
+fileTree.addEventListener('click', (event) => {
+  const row = (event.target as Element | null)?.closest<HTMLButtonElement>('.file-tree-row')
+  if (!row) return
+  const path = row.dataset.path
+  const kind = row.dataset.kind
+  if (!path || !kind) return
+  if (kind === 'directory') {
+    if (expandedTreeDirectories.has(path)) expandedTreeDirectories.delete(path)
+    else expandedTreeDirectories.add(path)
+    void renderWorkspaceTree()
+  } else if (kind === 'markdown') {
+    void openMarkdownPath(path).catch((error) => showToast(`打开失败：${errMsg(error)}`, 'error'))
+  } else if (kind === 'image') {
+    void insertImageFromPath(path).catch((error) => showToast(`插入图片失败：${errMsg(error)}`, 'error'))
+  }
 })
 
 editor.addEventListener('beforeinput', (event) => {
@@ -1294,6 +1561,7 @@ editorContextMenu.addEventListener('click', async (event) => {
     else if (action === 'copy') await copyEditorSelection()
     else if (action === 'paste') await pasteIntoEditor()
     else if (action === 'format-json') formatJsonCodeBlock()
+    else if (action === 'image') await insertImage()
     else if (action === 'table' || action === 'quote') handleToolbar(action)
   } catch (err) {
     showToast(`操作失败：${errMsg(err)}`, 'error')
@@ -1351,13 +1619,17 @@ editor.addEventListener('keydown', (e) => {
   }
   if (!(e.ctrlKey || e.metaKey)) return
   const key = e.key.toLowerCase()
-  if (key === 'b') { e.preventDefault(); wrapSelection('**') }
-  else if (key === 'i') { e.preventDefault(); wrapSelection('*') }
+  if (key === 'i') { e.preventDefault(); wrapSelection('*') }
 })
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && undoMarkdown()) {
     e.preventDefault()
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+    e.preventDefault()
+    toggleFileTree()
     return
   }
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return
@@ -1398,6 +1670,93 @@ conversionBtn.addEventListener('click', (event) => {
   toggleConversionMenu(!isConversionMenuOpen())
 })
 conversionMenu.addEventListener('click', () => toggleConversionMenu(false))
+
+function isFileMenuOpen() {
+  return fileMenu.classList.contains('open')
+}
+
+function toggleFileMenu(open: boolean) {
+  fileMenu.classList.toggle('open', open)
+  fileBtn.setAttribute('aria-expanded', String(open))
+  if (!open) {
+    recentFilesList.hidden = true
+    recentFilesBtn.setAttribute('aria-expanded', 'false')
+  }
+}
+
+function renderRecentFolderList() {
+  const recent = loadRecentFolders()
+  recentFilesList.replaceChildren()
+  if (!recent.length) {
+    const empty = document.createElement('span')
+    empty.className = 'recent-files-empty'
+    empty.textContent = '暂无最近文件夹'
+    recentFilesList.append(empty)
+    return
+  }
+  for (const path of recent) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.dataset.recentPath = path
+    button.title = path
+    button.textContent = fileNameFromPath(path)
+    recentFilesList.append(button)
+  }
+}
+
+function positionRecentFilesMenu() {
+  recentFilesList.classList.remove('opens-left')
+  recentFilesList.style.top = '-4px'
+  const inset = 8
+  let bounds = recentFilesList.getBoundingClientRect()
+  if (bounds.right > window.innerWidth - inset) {
+    recentFilesList.classList.add('opens-left')
+    bounds = recentFilesList.getBoundingClientRect()
+  }
+  if (bounds.bottom > window.innerHeight - inset) {
+    recentFilesList.style.top = `${-4 - (bounds.bottom - (window.innerHeight - inset))}px`
+  }
+}
+
+async function openRecentFolder(path: string) {
+  try {
+    await readDirectory(path)
+    workspaceRoot = path
+    expandedTreeDirectories.clear()
+    expandedTreeDirectories.add(path)
+    await renderWorkspaceTree()
+    rememberRecentFolder(path)
+    setStatus(`已打开文件夹 ${path}`)
+    toggleFileMenu(false)
+  } catch (error) {
+    const retained = loadRecentFolders().filter((item) => item !== path)
+    localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(retained))
+    renderRecentFolderList()
+    showToast(`无法打开最近文件夹：${errMsg(error)}`, 'error')
+  }
+}
+
+fileBtn.addEventListener('click', (event) => {
+  event.stopPropagation()
+  toggleConversionMenu(false)
+  toggleSettingsMenu(false)
+  toggleFileMenu(!isFileMenuOpen())
+})
+fileMenu.addEventListener('click', (event) => {
+  if ((event.target as Element | null)?.closest('[data-file]')) toggleFileMenu(false)
+})
+recentFilesBtn.addEventListener('click', (event) => {
+  event.stopPropagation()
+  const open = recentFilesList.hidden
+  renderRecentFolderList()
+  recentFilesList.hidden = !open
+  recentFilesBtn.setAttribute('aria-expanded', String(open))
+  if (open) positionRecentFilesMenu()
+})
+recentFilesList.addEventListener('click', (event) => {
+  const path = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-recent-path]')?.dataset.recentPath
+  if (path) void openRecentFolder(path)
+})
 
 // ---------- 设置菜单：文件关联 / 设为默认 ----------
 
@@ -1516,6 +1875,7 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('click', () => {
   toggleSettingsMenu(false)
   toggleConversionMenu(false)
+  toggleFileMenu(false)
 })
 // ESC 收起
 document.addEventListener('keydown', (e) => {
@@ -1526,6 +1886,10 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isConversionMenuOpen()) {
     toggleConversionMenu(false)
     conversionBtn.focus()
+  }
+  if (e.key === 'Escape' && isFileMenuOpen()) {
+    toggleFileMenu(false)
+    fileBtn.focus()
   }
 })
 
@@ -1607,10 +1971,27 @@ preview.addEventListener('scroll', () => syncScroll(preview, editor))
 // ---------- 可拖拽分栏（编辑器 / 预览宽度） ----------
 
 const splitter = document.querySelector<HTMLElement>('#splitter')!
+const fileTreeSplitter = document.querySelector<HTMLElement>('#file-tree-splitter')!
 const workspace = document.querySelector<HTMLElement>('#workspace')!
 const editorToggleBtn = document.querySelector<HTMLButtonElement>('#editor-toggle-btn')!
 const editorToggleLabel = document.querySelector<HTMLElement>('#editor-toggle-label')!
 const SPLIT_KEY = 'exchangemd:split'
+const FILE_TREE_HIDDEN_KEY = 'markflow:fileTreeHidden'
+const FILE_TREE_WIDTH_KEY = 'markflow:fileTreeWidth'
+
+function setFileTreeVisible(visible: boolean) {
+  workspace.classList.toggle('file-tree-hidden', !visible)
+  fileTreeToggleBtn.setAttribute('aria-expanded', String(visible))
+  fileTreeToggleBtn.title = visible ? '收起文件树' : '展开文件树'
+}
+
+setFileTreeVisible(localStorage.getItem(FILE_TREE_HIDDEN_KEY) !== 'true')
+function toggleFileTree() {
+  const visible = workspace.classList.contains('file-tree-hidden')
+  setFileTreeVisible(visible)
+  localStorage.setItem(FILE_TREE_HIDDEN_KEY, String(!visible))
+}
+fileTreeToggleBtn.addEventListener('click', toggleFileTree)
 
 editorToggleBtn.addEventListener('click', () => {
   const hidden = !workspace.classList.contains('editor-hidden')
@@ -1626,8 +2007,18 @@ function applySplit(pct: number): number {
   return clamped
 }
 
+function applyFileTreeWidth(width: number): number {
+  const max = Math.max(160, Math.min(640, workspace.clientWidth - 530))
+  const clamped = Math.min(max, Math.max(160, width))
+  workspace.style.setProperty('--tree-width', `${clamped}px`)
+  workspace.style.setProperty('--tree-editor-offset', `${Math.round(clamped / 2)}px`)
+  return clamped
+}
+
 const savedSplit = parseFloat(localStorage.getItem(SPLIT_KEY) || '')
 if (!isNaN(savedSplit)) applySplit(savedSplit)
+const savedFileTreeWidth = parseFloat(localStorage.getItem(FILE_TREE_WIDTH_KEY) || '')
+if (!isNaN(savedFileTreeWidth)) applyFileTreeWidth(savedFileTreeWidth)
 
 function startDrag(clientX: number) {
   splitter.classList.add('dragging')
@@ -1649,11 +2040,37 @@ splitter.addEventListener('mousedown', (e) => {
   e.preventDefault()
   startDrag(e.clientX)
 })
+
+function startFileTreeDrag(clientX: number) {
+  fileTreeSplitter.classList.add('dragging')
+  document.body.style.cursor = 'col-resize'
+  const rect = workspace.getBoundingClientRect()
+  const onMove = (ev: MouseEvent) => applyFileTreeWidth(ev.clientX - rect.left)
+  const onUp = () => {
+    fileTreeSplitter.classList.remove('dragging')
+    document.body.style.cursor = ''
+    localStorage.setItem(FILE_TREE_WIDTH_KEY, workspace.style.getPropertyValue('--tree-width') || '230px')
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+fileTreeSplitter.addEventListener('mousedown', (e) => {
+  e.preventDefault()
+  startFileTreeDrag(e.clientX)
+})
 // 键盘可达：左右方向键微调（可访问性）
 splitter.addEventListener('keydown', (e) => {
   const cur = parseFloat(workspace.style.getPropertyValue('--split')) || 54
   if (e.key === 'ArrowLeft') { e.preventDefault(); localStorage.setItem(SPLIT_KEY, applySplit(cur - 2) + '%') }
   else if (e.key === 'ArrowRight') { e.preventDefault(); localStorage.setItem(SPLIT_KEY, applySplit(cur + 2) + '%') }
+})
+fileTreeSplitter.addEventListener('keydown', (e) => {
+  const current = parseFloat(workspace.style.getPropertyValue('--tree-width')) || 230
+  if (e.key === 'ArrowLeft') { e.preventDefault(); localStorage.setItem(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current - 20)}px`) }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); localStorage.setItem(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current + 20)}px`) }
 })
 
 // ---------- 启动初始化 ----------

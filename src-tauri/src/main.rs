@@ -1,15 +1,19 @@
 // 防止 release 模式下弹出黑色控制台窗口（仅 Windows 生效，其它平台忽略）
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use serde::Serialize;
 use std::fs;
+use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::ipc::Response;
 
 const PROG_ID: &str = "ExchangeMD.md";
 const APP_NAME: &str = "MarkFlow.exe";
 const MD_EXTS: &[&str] = &[".md", ".markdown", ".mdown"];
+static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -102,6 +106,91 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 #[tauri::command]
 fn write_file_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
     fs::write(&path, bytes).map_err(|e| format!("写入文件失败：{e}"))
+}
+
+#[derive(Serialize)]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+}
+
+/// 读取一个目录的直接子项；文件树按需展开，不递归扫描整个文件夹。
+#[tauri::command]
+fn read_directory(path: String) -> Result<Vec<DirectoryEntry>, String> {
+    let mut entries = fs::read_dir(&path)
+        .map_err(|e| format!("读取文件夹失败：{e}"))?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            Some(DirectoryEntry {
+                name: entry.file_name().to_string_lossy().to_string(),
+                path: entry.path().to_string_lossy().to_string(),
+                is_dir: file_type.is_dir(),
+            })
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        right.is_dir.cmp(&left.is_dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+    Ok(entries)
+}
+
+fn child_path(parent: &str, name: &str) -> Result<PathBuf, String> {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err("名称不能为空，且不能包含路径分隔符".into());
+    }
+    Ok(Path::new(parent).join(name))
+}
+
+#[tauri::command]
+fn create_workspace_file(parent: String, name: String) -> Result<String, String> {
+    let path = child_path(&parent, &name)?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| format!("新建文件失败：{e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn create_workspace_folder(parent: String, name: String) -> Result<String, String> {
+    let path = child_path(&parent, &name)?;
+    fs::create_dir(&path).map_err(|e| format!("新建文件夹失败：{e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 返回 target 相对于 Markdown 文件所在目录的路径，用于图片引用。
+#[tauri::command]
+fn relative_path(from_file: String, target: String) -> Result<String, String> {
+    let base = Path::new(&from_file)
+        .parent()
+        .ok_or_else(|| "无法确定当前文档所在文件夹".to_string())?;
+    let relative = pathdiff::diff_paths(Path::new(&target), base)
+        .ok_or_else(|| "无法生成相对路径".to_string())?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+#[tauri::command]
+fn resolve_relative_path(from_file: String, relative: String) -> Result<String, String> {
+    let base = Path::new(&from_file)
+        .parent()
+        .ok_or_else(|| "无法确定当前文档所在文件夹".to_string())?;
+    Ok(base.join(relative).to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn new_window(app: tauri::AppHandle) -> Result<(), String> {
+    let label = format!("document-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
+    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App("index.html".into()))
+        .title("MarkFlow 文档转换工作台")
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(900.0, 600.0)
+        .build()
+        .map(|_| ())
+        .map_err(|e| format!("新建窗口失败：{e}"))
 }
 
 /// 启动时传入的文件路径（通过双击 / 右键打开时由系统传入 argv）
@@ -269,6 +358,12 @@ fn main() {
             read_file_bytes,
             write_text_file,
             write_file_bytes,
+            read_directory,
+            create_workspace_file,
+            create_workspace_folder,
+            relative_path,
+            resolve_relative_path,
+            new_window,
             get_launch_file,
             register_md_handler,
             open_default_apps_settings,

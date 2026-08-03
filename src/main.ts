@@ -123,6 +123,11 @@ const contextSubmenuTriggers = [...editorContextMenu.querySelectorAll<HTMLButton
 const fileTree = document.querySelector<HTMLElement>('#file-tree')!
 const workspaceLabel = document.querySelector<HTMLElement>('#workspace-label')!
 const fileTreeToggleBtn = document.querySelector<HTMLButtonElement>('#file-tree-toggle-btn')!
+const windowTitleEl = document.querySelector<HTMLElement>('#window-title')!
+const windowMinimizeBtn = document.querySelector<HTMLButtonElement>('#window-minimize-btn')!
+const windowMaximizeBtn = document.querySelector<HTMLButtonElement>('#window-maximize-btn')!
+const windowCloseBtn = document.querySelector<HTMLButtonElement>('#window-close-btn')!
+const quickAdaptiveContrastBtn = document.querySelector<HTMLButtonElement>('#quick-adaptive-contrast-btn')!
 const fileBtn = document.querySelector<HTMLButtonElement>('#file-btn')!
 const fileMenu = document.querySelector<HTMLElement>('#file-menu')!
 const recentFilesBtn = document.querySelector<HTMLButtonElement>('#recent-files-btn')!
@@ -180,6 +185,7 @@ function setCurrentFile(path: string | null) {
   fileLabel.textContent = path ?? '未保存的草稿 · Markdown 源码'
   const title = path ? fileNameFromPath(path) : APP_WINDOW_TITLE
   document.title = title
+  windowTitleEl.textContent = title
   if (isTauri()) void getCurrentWindow().setTitle(title).catch(() => undefined)
 }
 
@@ -377,6 +383,8 @@ function applyAppearance(settings: AppearanceSettings) {
   codeBlockOpacityValue.value = `${settings.codeBlockOpacity}%`
   adaptiveContrastToggle.setAttribute('aria-checked', String(settings.adaptiveContrastEnabled))
   adaptiveContrastValue.textContent = settings.adaptiveContrastEnabled ? '开启' : '关闭'
+  quickAdaptiveContrastBtn.setAttribute('aria-pressed', String(settings.adaptiveContrastEnabled))
+  quickAdaptiveContrastBtn.title = `自动反色显示：${settings.adaptiveContrastEnabled ? '开启' : '关闭'}`
   panelBlurToggle.setAttribute('aria-checked', String(settings.panelBlurEnabled))
   panelBlurValue.textContent = settings.panelBlurEnabled ? '开启' : '关闭'
   buttonTextColorInput.value = settings.buttonTextColor
@@ -1462,6 +1470,16 @@ function errMsg(err: unknown): string {
 
 // ---------- 绑定事件 ----------
 
+windowMinimizeBtn.addEventListener('click', () => {
+  if (isTauri()) void getCurrentWindow().minimize().catch(() => undefined)
+})
+windowMaximizeBtn.addEventListener('click', () => {
+  if (isTauri()) void getCurrentWindow().toggleMaximize().catch(() => undefined)
+})
+windowCloseBtn.addEventListener('click', () => {
+  if (isTauri()) void getCurrentWindow().close().catch(() => undefined)
+})
+
 document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((btn) => {
   btn.addEventListener('click', () => handleToolbar(btn.dataset.action!))
 })
@@ -1801,6 +1819,9 @@ codeBlockOpacityInput.addEventListener('input', () => {
   updateAppearance({ codeBlockOpacity: Number(codeBlockOpacityInput.value) })
 })
 adaptiveContrastToggle.addEventListener('click', () => {
+  updateAppearance({ adaptiveContrastEnabled: !appearanceSettings.adaptiveContrastEnabled })
+})
+quickAdaptiveContrastBtn.addEventListener('click', () => {
   updateAppearance({ adaptiveContrastEnabled: !appearanceSettings.adaptiveContrastEnabled })
 })
 panelBlurToggle.addEventListener('click', () => {

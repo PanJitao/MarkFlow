@@ -12,6 +12,7 @@ import powershell from 'highlight.js/lib/languages/powershell'
 import python from 'highlight.js/lib/languages/python'
 import sql from 'highlight.js/lib/languages/sql'
 import { isTauri } from '@tauri-apps/api/core'
+import { Image } from '@tauri-apps/api/image'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
@@ -583,7 +584,12 @@ function setFavicon(bytes: number[], path: string) {
 
 async function applyAppIconPath(path: string) {
   if (!isTauri()) return
-  await getCurrentWindow().setIcon(path)
+  const icon = await Image.fromPath(path)
+  try {
+    await getCurrentWindow().setIcon(icon)
+  } finally {
+    await icon.close()
+  }
   const bytes = await readFileBytes(path)
   setFavicon(bytes, path)
 }

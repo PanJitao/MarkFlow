@@ -39,6 +39,10 @@ import {
   swapExtension,
   getLaunchFile,
   registerMdHandler,
+  installCustomAppIcon,
+  installCustomFileIcon,
+  clearCustomIcon,
+  getIconPath,
   openDefaultAppsSettings,
   openUrl,
   readDirectory,
@@ -82,12 +86,16 @@ const SAMPLE = `# 欢迎使用 MarkFlow
 `
 
 const editor = document.querySelector<HTMLTextAreaElement>('#editor')!
+const editorLineNumbers = document.querySelector<HTMLElement>('#editor-line-numbers')!
 const preview = document.querySelector<HTMLElement>('#preview')!
 const statusEl = document.querySelector<HTMLElement>('#status')!
+const saveStrategyEl = document.querySelector<HTMLElement>('#save-strategy')!
+const saveStateEl = document.querySelector<HTMLElement>('#save-state')!
 const fileLabel = document.querySelector<HTMLElement>('#file-label')!
 const wordCountEl = document.querySelector<HTMLElement>('#word-count')!
 const zoomLevelEl = document.querySelector<HTMLElement>('#zoom-level')!
-const toastEl = document.querySelector<HTMLElement>('#toast')!
+const toastRegionEl = document.querySelector<HTMLElement>('#toast-region')!
+const toastTemplateEl = document.querySelector<HTMLTemplateElement>('#toast-template')!
 const customBackground = document.querySelector<HTMLElement>('#custom-background')!
 const backgroundImage = document.querySelector<HTMLImageElement>('#background-image')!
 const backgroundVideo = document.querySelector<HTMLVideoElement>('#background-video')!
@@ -103,21 +111,38 @@ const chooseBackgroundBtn = document.querySelector<HTMLButtonElement>('#choose-b
 const clearBackgroundBtn = document.querySelector<HTMLButtonElement>('#clear-background-btn')!
 const backgroundFileInput = document.querySelector<HTMLInputElement>('#background-file-input')!
 const backgroundFileName = document.querySelector<HTMLElement>('#background-file-name')!
+const chooseAppIconBtn = document.querySelector<HTMLButtonElement>('#choose-app-icon-btn')!
+const clearAppIconBtn = document.querySelector<HTMLButtonElement>('#clear-app-icon-btn')!
+const appIconName = document.querySelector<HTMLElement>('#app-icon-name')!
+const chooseFileIconBtn = document.querySelector<HTMLButtonElement>('#choose-file-icon-btn')!
+const clearFileIconBtn = document.querySelector<HTMLButtonElement>('#clear-file-icon-btn')!
+const fileIconName = document.querySelector<HTMLElement>('#file-icon-name')!
 const backgroundColorInput = document.querySelector<HTMLInputElement>('#background-color-input')!
 const backgroundOpacityInput = document.querySelector<HTMLInputElement>('#background-opacity-input')!
 const backgroundOpacityValue = document.querySelector<HTMLOutputElement>('#background-opacity-value')!
 const panelOpacityInput = document.querySelector<HTMLInputElement>('#panel-opacity-input')!
 const panelOpacityValue = document.querySelector<HTMLOutputElement>('#panel-opacity-value')!
+const codeBlockColorInput = document.querySelector<HTMLInputElement>('#code-block-color-input')!
 const codeBlockOpacityInput = document.querySelector<HTMLInputElement>('#code-block-opacity-input')!
 const codeBlockOpacityValue = document.querySelector<HTMLOutputElement>('#code-block-opacity-value')!
-const adaptiveContrastToggle = document.querySelector<HTMLButtonElement>('#adaptive-contrast-toggle')!
-const adaptiveContrastValue = document.querySelector<HTMLElement>('#adaptive-contrast-value')!
+const autoSaveIntervalInput = document.querySelector<HTMLInputElement>('#auto-save-interval-input')!
+const autoSaveIntervalValue = document.querySelector<HTMLOutputElement>('#auto-save-interval-value')!
+const autoSaveWindowBlurToggle = document.querySelector<HTMLButtonElement>('#auto-save-window-blur-toggle')!
+const autoSaveWindowBlurValue = document.querySelector<HTMLElement>('#auto-save-window-blur-value')!
+const autoSaveFileSwitchToggle = document.querySelector<HTMLButtonElement>('#auto-save-file-switch-toggle')!
+const autoSaveFileSwitchValue = document.querySelector<HTMLElement>('#auto-save-file-switch-value')!
 const panelBlurToggle = document.querySelector<HTMLButtonElement>('#panel-blur-toggle')!
 const panelBlurValue = document.querySelector<HTMLElement>('#panel-blur-value')!
+const topbarBlurToggle = document.querySelector<HTMLButtonElement>('#topbar-blur-toggle')!
+const topbarBlurValue = document.querySelector<HTMLElement>('#topbar-blur-value')!
+const statusbarBlurToggle = document.querySelector<HTMLButtonElement>('#statusbar-blur-toggle')!
+const statusbarBlurValue = document.querySelector<HTMLElement>('#statusbar-blur-value')!
 const buttonTextColorInput = document.querySelector<HTMLInputElement>('#button-text-color-input')!
 const editorColorInput = document.querySelector<HTMLInputElement>('#editor-color-input')!
 const previewColorInput = document.querySelector<HTMLInputElement>('#preview-color-input')!
 const resetAppearanceBtn = document.querySelector<HTMLButtonElement>('#reset-appearance-btn')!
+const themeModeButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-theme-mode]')]
+const checkUpdatesBtn = document.querySelector<HTMLButtonElement>('#check-updates-btn')!
 const editorContextMenu = document.querySelector<HTMLElement>('#editor-context-menu')!
 const contextSubmenuTriggers = [...editorContextMenu.querySelectorAll<HTMLButtonElement>('[data-context-submenu]')]
 const fileTree = document.querySelector<HTMLElement>('#file-tree')!
@@ -127,27 +152,39 @@ const windowTitleEl = document.querySelector<HTMLElement>('#window-title')!
 const windowMinimizeBtn = document.querySelector<HTMLButtonElement>('#window-minimize-btn')!
 const windowMaximizeBtn = document.querySelector<HTMLButtonElement>('#window-maximize-btn')!
 const windowCloseBtn = document.querySelector<HTMLButtonElement>('#window-close-btn')!
-const quickAdaptiveContrastBtn = document.querySelector<HTMLButtonElement>('#quick-adaptive-contrast-btn')!
 const fileBtn = document.querySelector<HTMLButtonElement>('#file-btn')!
 const fileMenu = document.querySelector<HTMLElement>('#file-menu')!
 const recentFilesBtn = document.querySelector<HTMLButtonElement>('#recent-files-btn')!
 const recentFilesList = document.querySelector<HTMLElement>('#recent-files-list')!
-let toastTimer: ReturnType<typeof setTimeout> | null = null
+const TOAST_DURATION_MS = 3000
+const TOAST_EXIT_MS = 220
+const MAX_VISIBLE_TOASTS = 5
 let appearanceSettings = loadAppearanceSettings()
 let backgroundObjectUrl: string | null = null
+let faviconObjectUrl: string | null = null
 let contextSelection: { start: number; end: number } | null = null
 let pendingContextSelection: { start: number; end: number } | null = null
 let lastNonEmptySelection: { start: number; end: number } | null = null
 let availableUpdate: Update | null = null
 let updateInstalling = false
+let zoomToast: HTMLElement | null = null
+let zoomToastTimer: ReturnType<typeof setTimeout> | null = null
 
 let markdown = SAMPLE
 let currentFile: string | null = null
+let lastSavedMarkdown: string | null = null
 let workspaceRoot: string | null = null
 const previewImageObjectUrls = new Set<string>()
 const expandedTreeDirectories = new Set<string>()
 let busy = false
+let autoSaveTimer: ReturnType<typeof setInterval> | null = null
+let autoSaveInFlight: Promise<'saved' | 'skipped' | 'failed'> | null = null
+let saveInFlight: Promise<void> | null = null
+let autoSaveErrorShown = false
 let writingPreviewTable = false
+let renderedEditorLineCount = 0
+let previewAnchorFrame: number | null = null
+let previewScrollAnchors: Array<{ line: number; top: number }> = []
 const undoStack: Array<{ value: string; start: number; end: number }> = []
 const MAX_UNDO_STEPS = 100
 
@@ -187,6 +224,7 @@ function setCurrentFile(path: string | null) {
   document.title = title
   windowTitleEl.textContent = title
   if (isTauri()) void getCurrentWindow().setTitle(title).catch(() => undefined)
+  updateDocumentSaveState()
 }
 
 const STATE_KEY = 'exchangemd:lastState'
@@ -233,6 +271,32 @@ function setStatus(msg: string) {
   statusEl.textContent = msg
 }
 
+type DocumentSaveState = 'saved' | 'unsaved' | 'saving' | 'error'
+
+function setDocumentSaveState(state: DocumentSaveState) {
+  const labels: Record<DocumentSaveState, string> = {
+    saved: '已保存',
+    unsaved: '未保存',
+    saving: '保存中',
+    error: '保存失败',
+  }
+  saveStateEl.dataset.state = state
+  saveStateEl.textContent = labels[state]
+}
+
+function updateDocumentSaveState() {
+  setDocumentSaveState(currentFile !== null && markdown === lastSavedMarkdown ? 'saved' : 'unsaved')
+}
+
+function updateAutoSaveStrategyStatus(settings = appearanceSettings) {
+  const strategies = [`每 ${settings.autoSaveIntervalSeconds} 秒`]
+  if (settings.autoSaveOnWindowBlur) strategies.push('窗口失焦')
+  if (settings.autoSaveOnFileSwitch) strategies.push('切换文件')
+  const label = `自动保存：${strategies.join(' · ')}`
+  saveStrategyEl.textContent = label
+  saveStrategyEl.title = label
+}
+
 /** 更新字数统计（汉字按字、英文按词综合估算） */
 function updateCount() {
   const text = editor.value.trim()
@@ -244,13 +308,82 @@ function updateCount() {
 }
 
 /** 短暂浮层提示 */
+function dismissToast(toast: HTMLElement) {
+  if (!toast.isConnected || toast.classList.contains('closing')) return
+  toast.classList.remove('show')
+  toast.classList.add('closing')
+  setTimeout(() => {
+    toast.remove()
+    if (!toastRegionEl.querySelector('.toast')) closeToastRegion()
+  }, TOAST_EXIT_MS)
+}
+
+function openToastRegion() {
+  const region = toastRegionEl as HTMLElement & { showPopover?: () => void; hidePopover?: () => void }
+  if (typeof region.showPopover !== 'function') return
+  try {
+    if (toastRegionEl.matches(':popover-open')) {
+      if (!document.querySelector('dialog[open]') || typeof region.hidePopover !== 'function') return
+      region.hidePopover()
+    }
+    region.showPopover()
+  } catch { /* 旧版 WebView 不支持 popover 时保留原有通知 */ }
+}
+
+function closeToastRegion() {
+  const region = toastRegionEl as HTMLElement & { hidePopover?: () => void }
+  if (typeof region.hidePopover !== 'function' || !toastRegionEl.matches(':popover-open')) return
+  try { region.hidePopover() } catch { /* 通知已经关闭 */ }
+}
+
 function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
-  toastEl.textContent = message
-  toastEl.className = `toast show ${type}`
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    toastEl.className = 'toast'
-  }, 3200)
+  openToastRegion()
+  const fragment = toastTemplateEl.content.cloneNode(true) as DocumentFragment
+  const toast = fragment.querySelector<HTMLElement>('.toast')!
+  const messageEl = fragment.querySelector<HTMLElement>('.toast-message')!
+  messageEl.textContent = message
+  toast.classList.add(type)
+  toast.style.setProperty('--toast-duration', `${TOAST_DURATION_MS}ms`)
+  toastRegionEl.prepend(fragment)
+
+  const overflow = [...toastRegionEl.querySelectorAll<HTMLElement>('.toast')].slice(MAX_VISIBLE_TOASTS)
+  overflow.forEach((item) => item.remove())
+
+  requestAnimationFrame(() => toast.classList.add('show'))
+  setTimeout(() => dismissToast(toast), TOAST_DURATION_MS)
+}
+
+function showZoomToast(message: string) {
+  openToastRegion()
+  let toast = zoomToast
+  if (!toast || !toast.isConnected || toast.classList.contains('closing')) {
+    const fragment = toastTemplateEl.content.cloneNode(true) as DocumentFragment
+    toast = fragment.querySelector<HTMLElement>('.toast')!
+    toast.classList.add('info', 'zoom-toast')
+    toastRegionEl.prepend(fragment)
+    zoomToast = toast
+    const overflow = [...toastRegionEl.querySelectorAll<HTMLElement>('.toast')].slice(MAX_VISIBLE_TOASTS)
+    overflow.forEach((item) => item.remove())
+    requestAnimationFrame(() => toast?.classList.add('show'))
+  }
+
+  const messageEl = toast.querySelector<HTMLElement>('.toast-message')
+  const progressBar = toast.querySelector<HTMLElement>('.toast-progress-bar')
+  if (messageEl) messageEl.textContent = message
+  toast.style.setProperty('--toast-duration', `${TOAST_DURATION_MS}ms`)
+  if (progressBar) {
+    progressBar.style.animation = 'none'
+    void progressBar.offsetWidth
+    progressBar.style.removeProperty('animation')
+  }
+  if (zoomToastTimer) clearTimeout(zoomToastTimer)
+  zoomToastTimer = setTimeout(() => {
+    if (zoomToast === toast) {
+      dismissToast(toast)
+      zoomToast = null
+      zoomToastTimer = null
+    }
+  }, TOAST_DURATION_MS)
 }
 
 // ---------- 在线更新 ----------
@@ -281,11 +414,23 @@ function showUpdateProgress(event: DownloadEvent, state: { total: number; downlo
   updateStatusEl.textContent = '下载完成，正在安装…'
 }
 
-async function checkForUpdate() {
-  if (!isTauri()) return
+async function checkForUpdate(manual = false): Promise<boolean> {
+  if (!isTauri()) {
+    if (manual) {
+      setStatus('当前运行在浏览器预览环境，无法检查桌面更新')
+      showToast('桌面应用中才可以检查更新', 'info')
+    }
+    return false
+  }
   try {
     const update = await check({ timeout: 12_000 })
-    if (!update) return
+    if (!update) {
+      if (manual) {
+        setStatus('当前已是最新版本')
+        showToast('当前已是最新版本', 'success')
+      }
+      return false
+    }
     availableUpdate = update
     updateInstalling = false
     updateVersionEl.textContent = `发现新版本 ${update.version}，当前版本 ${update.currentVersion}`
@@ -296,8 +441,15 @@ async function checkForUpdate() {
       window.getSelection()?.removeAllRanges()
       updateDialog.showModal()
     }
+    if (manual) setStatus(`发现新版本 ${update.version}`)
+    return true
   } catch (err) {
     console.warn('检查更新失败', err)
+    if (manual) {
+      setStatus(`检查更新失败：${errMsg(err)}`)
+      showToast(`检查更新失败：${errMsg(err)}`, 'error')
+    }
+    return false
   }
 }
 
@@ -327,21 +479,27 @@ updateConfirmBtn.addEventListener('click', async () => {
 
 const MAX_BACKGROUND_BYTES = 100 * 1024 * 1024
 
-function adaptiveTextColor(background: string): string {
-  const red = parseInt(background.slice(1, 3), 16) / 255
-  const green = parseInt(background.slice(3, 5), 16) / 255
-  const blue = parseInt(background.slice(5, 7), 16) / 255
-  const linear = (value: number) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
-  const luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
-  return luminance > 0.42 ? '#20262e' : '#ffffff'
+function restartAutoSaveTimer() {
+  if (autoSaveTimer) clearInterval(autoSaveTimer)
+  autoSaveTimer = setInterval(() => {
+    void autoSaveCurrentFile('interval')
+  }, appearanceSettings.autoSaveIntervalSeconds * 1000)
 }
 
 function applyAppearance(settings: AppearanceSettings) {
   const root = document.documentElement
+  const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+  const darkTheme = settings.themeMode === 'dark' || (settings.themeMode === 'system' && systemDark)
+  root.dataset.theme = darkTheme ? 'dark' : 'light'
+  themeModeButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.themeMode === settings.themeMode))
+  })
   const panelOpacity = settings.panelOpacity / 100
   const codeBlockOpacity = settings.codeBlockOpacity / 100
-  const contrastText = adaptiveTextColor(settings.backgroundColor)
-  root.style.setProperty('--bg', settings.backgroundColor)
+  const effectiveBackgroundColor = settings.backgroundColor === DEFAULT_APPEARANCE.backgroundColor && darkTheme
+    ? '#101010'
+    : settings.backgroundColor
+  root.style.setProperty('--bg', effectiveBackgroundColor)
   root.style.setProperty('--background-opacity', String(settings.backgroundOpacity / 100))
   root.style.setProperty('--panel-opacity', String(panelOpacity))
   root.style.setProperty('--panel-highlight-opacity', String(panelOpacity * 0.28))
@@ -349,12 +507,13 @@ function applyAppearance(settings: AppearanceSettings) {
   root.style.setProperty('--panel-reflection-opacity', String(panelOpacity * 0.19))
   root.style.setProperty('--panel-soft-opacity', String(panelOpacity * 0.06))
   root.style.setProperty('--panel-header-opacity', String(panelOpacity * 0.4))
-  root.style.setProperty('--code-block-opacity', String(codeBlockOpacity))
-  root.style.setProperty('--code-gutter-opacity', String(Math.max(0.08, codeBlockOpacity * 0.72)))
+  root.style.setProperty('--code-block-background', `color-mix(in srgb, ${settings.codeBlockColor} ${settings.codeBlockOpacity}%, transparent)`)
+  root.style.setProperty('--code-gutter-text', `color-mix(in srgb, #94a3b8 ${Math.max(18, settings.codeBlockOpacity)}%, var(--text-muted))`)
   root.style.setProperty('--code-shadow-opacity', String(0.12 + codeBlockOpacity * 0.24))
   root.style.setProperty('--code-border-opacity', String(0.14 + codeBlockOpacity * 0.28))
   root.style.setProperty('--code-block-blur', settings.panelBlurEnabled ? '12px' : '0px')
-  root.classList.toggle('adaptive-contrast-enabled', settings.adaptiveContrastEnabled)
+  root.style.setProperty('--topbar-blur', settings.topbarBlurEnabled ? '16px' : '0px')
+  root.style.setProperty('--statusbar-blur', settings.statusbarBlurEnabled ? '16px' : '0px')
   root.style.setProperty('--content-highlight-opacity', String(panelOpacity * 0.21))
   root.style.setProperty('--content-reflection-opacity', String(panelOpacity * 0.13))
   root.style.setProperty('--content-soft-opacity', String(panelOpacity * 0.04))
@@ -369,24 +528,34 @@ function applyAppearance(settings: AppearanceSettings) {
   root.style.setProperty('--panel-header-blur', settings.panelBlurEnabled ? '16px' : '0px')
   root.style.setProperty('--content-blur', settings.panelBlurEnabled ? '16px' : '0px')
   root.style.setProperty('--glass-blur', settings.panelBlurEnabled ? '8px' : '0px')
-  root.style.setProperty('--adaptive-text', contrastText)
-  root.style.setProperty('--button-text', settings.adaptiveContrastEnabled ? contrastText : settings.buttonTextColor)
-  root.style.setProperty('--editor-text', settings.editorColor)
-  root.style.setProperty('--preview-text', settings.previewColor)
+  const defaultButtonText = darkTheme ? '#e5e5e5' : DEFAULT_APPEARANCE.buttonTextColor
+  const defaultEditorText = darkTheme ? '#f2f2f2' : DEFAULT_APPEARANCE.editorColor
+  const defaultPreviewText = darkTheme ? '#f2f2f2' : DEFAULT_APPEARANCE.previewColor
+  root.style.setProperty('--button-text', settings.buttonTextColor === DEFAULT_APPEARANCE.buttonTextColor ? defaultButtonText : settings.buttonTextColor)
+  root.style.setProperty('--editor-text', settings.editorColor === DEFAULT_APPEARANCE.editorColor ? defaultEditorText : settings.editorColor)
+  root.style.setProperty('--preview-text', settings.previewColor === DEFAULT_APPEARANCE.previewColor ? defaultPreviewText : settings.previewColor)
 
   backgroundColorInput.value = settings.backgroundColor
   backgroundOpacityInput.value = String(settings.backgroundOpacity)
   backgroundOpacityValue.value = `${settings.backgroundOpacity}%`
   panelOpacityInput.value = String(settings.panelOpacity)
   panelOpacityValue.value = `${settings.panelOpacity}%`
+  codeBlockColorInput.value = settings.codeBlockColor
   codeBlockOpacityInput.value = String(settings.codeBlockOpacity)
   codeBlockOpacityValue.value = `${settings.codeBlockOpacity}%`
-  adaptiveContrastToggle.setAttribute('aria-checked', String(settings.adaptiveContrastEnabled))
-  adaptiveContrastValue.textContent = settings.adaptiveContrastEnabled ? '开启' : '关闭'
-  quickAdaptiveContrastBtn.setAttribute('aria-pressed', String(settings.adaptiveContrastEnabled))
-  quickAdaptiveContrastBtn.title = `自动反色显示：${settings.adaptiveContrastEnabled ? '开启' : '关闭'}`
+  autoSaveIntervalInput.value = String(settings.autoSaveIntervalSeconds)
+  autoSaveIntervalValue.value = `${settings.autoSaveIntervalSeconds} 秒`
+  autoSaveWindowBlurToggle.setAttribute('aria-checked', String(settings.autoSaveOnWindowBlur))
+  autoSaveWindowBlurValue.textContent = settings.autoSaveOnWindowBlur ? '开启' : '关闭'
+  autoSaveFileSwitchToggle.setAttribute('aria-checked', String(settings.autoSaveOnFileSwitch))
+  autoSaveFileSwitchValue.textContent = settings.autoSaveOnFileSwitch ? '开启' : '关闭'
+  updateAutoSaveStrategyStatus(settings)
   panelBlurToggle.setAttribute('aria-checked', String(settings.panelBlurEnabled))
   panelBlurValue.textContent = settings.panelBlurEnabled ? '开启' : '关闭'
+  topbarBlurToggle.setAttribute('aria-checked', String(settings.topbarBlurEnabled))
+  topbarBlurValue.textContent = settings.topbarBlurEnabled ? '开启' : '关闭'
+  statusbarBlurToggle.setAttribute('aria-checked', String(settings.statusbarBlurEnabled))
+  statusbarBlurValue.textContent = settings.statusbarBlurEnabled ? '开启' : '关闭'
   buttonTextColorInput.value = settings.buttonTextColor
   editorColorInput.value = settings.editorColor
   previewColorInput.value = settings.previewColor
@@ -394,6 +563,49 @@ function applyAppearance(settings: AppearanceSettings) {
   if (settings.backgroundOpacity === 0) backgroundVideo.pause()
   else if (customBackground.classList.contains('has-video') && !document.hidden) {
     void backgroundVideo.play().catch(() => undefined)
+  }
+  restartAutoSaveTimer()
+}
+
+function iconMimeType(path: string) {
+  return path.toLowerCase().endsWith('.ico') ? 'image/x-icon' : 'image/png'
+}
+
+function setFavicon(bytes: number[], path: string) {
+  const link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]') || document.createElement('link')
+  link.rel = 'icon'
+  link.type = iconMimeType(path)
+  if (!link.parentElement) document.head.append(link)
+  if (faviconObjectUrl) URL.revokeObjectURL(faviconObjectUrl)
+  faviconObjectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: link.type }))
+  link.href = faviconObjectUrl
+}
+
+async function applyAppIconPath(path: string) {
+  if (!isTauri()) return
+  await getCurrentWindow().setIcon(path)
+  const bytes = await readFileBytes(path)
+  setFavicon(bytes, path)
+}
+
+function updateIconLabels() {
+  const appName = localStorage.getItem('markflow:customAppIconName')
+  const fileName = localStorage.getItem('markflow:customFileIconName')
+  appIconName.textContent = appName || '使用内置图标'
+  appIconName.title = appName || '使用内置软件图标'
+  clearAppIconBtn.disabled = !appName
+  fileIconName.textContent = fileName || '使用内置图标'
+  fileIconName.title = fileName || '使用内置 Markdown 文件图标'
+  clearFileIconBtn.disabled = !fileName
+}
+
+async function restoreConfiguredIcons() {
+  updateIconLabels()
+  if (!isTauri()) return
+  try {
+    await applyAppIconPath(await getIconPath('app'))
+  } catch {
+    // 图标恢复失败不应阻止编辑器启动。
   }
 }
 
@@ -405,18 +617,6 @@ function updateAppearance(patch: Partial<AppearanceSettings>) {
   } catch {
     // 设置体积很小；存储不可用时仍保留当前会话效果。
   }
-}
-
-function enableAdaptiveButtonLabels() {
-  document.querySelectorAll<HTMLButtonElement>('button').forEach((button) => {
-    for (const child of [...button.childNodes]) {
-      if (child.nodeType !== Node.TEXT_NODE || !child.textContent?.trim()) continue
-      const label = document.createElement('span')
-      label.className = 'adaptive-contrast'
-      label.textContent = child.textContent
-      button.replaceChild(label, child)
-    }
-  })
 }
 
 function backgroundKind(asset: Pick<StoredBackgroundAsset, 'name' | 'type'>): 'image' | 'video' | null {
@@ -475,21 +675,37 @@ let contentZoom = 100
 let restoringZoomScroll = false
 let lastWheelZoomAt = 0
 
-function scrollProgress(element: HTMLElement) {
-  const range = element.scrollHeight - element.clientHeight
-  return range > 0 ? element.scrollTop / range : 0
+function markdownLineCount(value = editor.value) {
+  return (value.match(/\n/g) || []).length + 1
+}
+
+function renderEditorLineNumbers(value = editor.value) {
+  const lineCount = markdownLineCount(value)
+  if (lineCount === renderedEditorLineCount) return
+  const fragment = document.createDocumentFragment()
+  for (let line = 1; line <= lineCount; line += 1) {
+    const number = document.createElement('span')
+    number.className = 'editor-line-number'
+    number.textContent = String(line)
+    fragment.append(number)
+  }
+  editorLineNumbers.replaceChildren(fragment)
+  renderedEditorLineCount = lineCount
+}
+
+function syncEditorLineNumbers() {
+  editorLineNumbers.scrollTop = editor.scrollTop
 }
 
 function setContentZoom(nextZoom: number) {
   const clamped = Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, nextZoom))
   if (clamped === contentZoom) {
     const atLimit = clamped === CONTENT_ZOOM_MIN || clamped === CONTENT_ZOOM_MAX
-    showToast(atLimit ? `显示比例已达 ${clamped}%` : `内容显示 ${clamped}%`, 'info')
+    showZoomToast(atLimit ? `显示比例已达 ${clamped}%` : `内容显示 ${clamped}%`)
     return
   }
 
-  const editorProgress = scrollProgress(editor)
-  const previewProgress = scrollProgress(preview)
+  const sourceLine = editorSourceLineAtScroll()
   contentZoom = clamped
   restoringZoomScroll = true
   document.documentElement.style.setProperty('--content-scale', String(contentZoom / 100))
@@ -497,27 +713,33 @@ function setContentZoom(nextZoom: number) {
   zoomLevelEl.setAttribute('aria-label', `内容显示比例 ${contentZoom}%`)
 
   requestAnimationFrame(() => {
-    editor.scrollTop = editorProgress * Math.max(0, editor.scrollHeight - editor.clientHeight)
-    preview.scrollTop = previewProgress * Math.max(0, preview.scrollHeight - preview.clientHeight)
+    updatePreviewScrollAnchors()
+    editor.scrollTop = Math.max(0, (sourceLine - 1) * editorLineHeight())
+    preview.scrollTop = previewOffsetForSourceLine(sourceLine)
+    syncEditorLineNumbers()
     requestAnimationFrame(() => { restoringZoomScroll = false })
   })
-  showToast(`内容显示 ${contentZoom}%`, 'info')
+  showZoomToast(`内容显示 ${contentZoom}%`)
 }
 
 function setMarkdown(value: string) {
   undoStack.length = 0
   markdown = value
   editor.value = value
+  renderEditorLineNumbers(value)
   renderPreview(value)
   updateCount()
   schedulePersist()
+  updateDocumentSaveState()
 }
 
 function renderOnly() {
+  renderEditorLineNumbers()
   renderPreview(editor.value)
   markdown = editor.value
   updateCount()
   schedulePersist()
+  updateDocumentSaveState()
 }
 
 function recordUndoState() {
@@ -624,12 +846,20 @@ function appendHighlightedLine(container: HTMLElement, line: string, language: s
 }
 
 function enhanceCodeBlock(code: HTMLElement) {
+  const pre = code.closest('pre')
   const source = code.textContent || ''
   const hasTrailingNewline = source.endsWith('\n')
   const lines = (hasTrailingNewline ? source.slice(0, -1) : source).split('\n')
   const language = codeLanguage(code)
   const json = isJsonLanguage(language)
   const highlightLanguage = codeHighlightLanguage(language)
+
+  const layout = document.createElement('div')
+  const gutter = document.createElement('div')
+  const scroll = document.createElement('div')
+  layout.className = 'code-layout'
+  gutter.className = 'code-gutter'
+  scroll.className = 'code-scroll'
 
   code.textContent = ''
   code.classList.add('code-with-line-numbers')
@@ -651,9 +881,14 @@ function enhanceCodeBlock(code: HTMLElement) {
     else if (highlightLanguage) appendHighlightedLine(lineContent, line, highlightLanguage)
     else lineContent.textContent = line
 
-    row.append(lineNumber, lineContent)
+    row.append(lineContent)
+    gutter.append(lineNumber)
     code.append(row)
   })
+
+  layout.append(gutter, scroll)
+  scroll.append(code)
+  if (pre) pre.append(layout)
 }
 
 function codeBlockText(code: HTMLElement) {
@@ -733,6 +968,10 @@ function renderPreview(value: string) {
     pre.before(wrapper)
     wrapper.append(pre, button)
   })
+  preview.querySelectorAll<HTMLImageElement>('img').forEach((image) => {
+    image.addEventListener('load', schedulePreviewScrollAnchors, { once: true })
+  })
+  schedulePreviewScrollAnchors()
   void resolvePreviewImages()
 }
 
@@ -1206,10 +1445,69 @@ function markdownImagePath(path: string) {
   return /[\s()]/.test(path) ? `<${path}>` : path
 }
 
+async function writeMarkdownFile(target: string, content: string) {
+  if (saveInFlight) await saveInFlight
+  const operation = writeTextFile(target, content)
+  saveInFlight = operation
+  try {
+    await operation
+  } finally {
+    if (saveInFlight === operation) saveInFlight = null
+  }
+}
+
+async function autoSaveCurrentFile(trigger: 'interval' | 'window-blur' | 'file-switch'): Promise<'saved' | 'skipped' | 'failed'> {
+  if (!currentFile || markdown === lastSavedMarkdown) return 'skipped'
+  if (autoSaveInFlight) return autoSaveInFlight
+
+  const target = currentFile
+  const content = markdown
+  setDocumentSaveState('saving')
+  const operation = (async (): Promise<'saved' | 'failed'> => {
+    try {
+      await writeMarkdownFile(target, content)
+      if (currentFile === target && markdown === content) lastSavedMarkdown = content
+      updateDocumentSaveState()
+      autoSaveErrorShown = false
+      if (trigger === 'window-blur') setStatus('窗口失焦，已自动保存')
+      else if (trigger === 'file-switch') setStatus('切换文件前已自动保存')
+      else setStatus('已自动保存')
+      return 'saved'
+    } catch (err) {
+      setDocumentSaveState('error')
+      setStatus(`自动保存失败：${errMsg(err)}`)
+      if (!autoSaveErrorShown) {
+        autoSaveErrorShown = true
+        showToast(`自动保存失败：${errMsg(err)}`, 'error')
+      }
+      return 'failed'
+    }
+  })()
+  autoSaveInFlight = operation
+  try {
+    return await operation
+  } finally {
+    if (autoSaveInFlight === operation) autoSaveInFlight = null
+  }
+}
+
+async function saveBeforeFileSwitch() {
+  if (!appearanceSettings.autoSaveOnFileSwitch) return true
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await autoSaveCurrentFile('file-switch')
+    if (result === 'failed') return false
+    if (!currentFile || markdown === lastSavedMarkdown) return true
+  }
+  return false
+}
+
 async function openMarkdownPath(path: string) {
+  if (!await saveBeforeFileSwitch()) return
   const text = await readTextFile(path)
   setCurrentFile(path)
   setMarkdown(text)
+  lastSavedMarkdown = text
+  updateDocumentSaveState()
   if (!workspaceRoot) {
     workspaceRoot = parentDirectoryFromPath(path)
     rememberRecentFolder(workspaceRoot)
@@ -1237,7 +1535,10 @@ async function renderWorkspaceTree() {
   if (!workspaceRoot) {
     workspaceLabel.textContent = '文件'
     workspaceLabel.title = '未打开文件夹'
-    fileTree.replaceChildren()
+    const empty = document.createElement('div')
+    empty.className = 'file-tree-empty'
+    empty.innerHTML = '<span class="file-tree-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span><strong>未打开文件夹</strong><span>打开一个文件夹后，文件会显示在这里。</span>'
+    fileTree.replaceChildren(empty)
     return
   }
 
@@ -1264,6 +1565,10 @@ async function appendTreeEntries(container: DocumentFragment | HTMLElement, fold
     row.style.setProperty('--tree-indent', `${depth * 16}px`)
     row.dataset.path = entry.path
     row.dataset.kind = entry.is_dir ? 'directory' : isImagePath(entry.path) ? 'image' : isMarkdownPath(entry.path) ? 'markdown' : 'file'
+    if (!entry.is_dir && currentFile === entry.path) {
+      row.classList.add('active')
+      row.setAttribute('aria-current', 'page')
+    }
     row.title = entry.path
 
     const icon = document.createElement('span')
@@ -1331,8 +1636,11 @@ async function newWorkspaceFolder() {
 async function openMarkdown() {
   const picked = await pickOpenFile([{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }], 'text')
   if (!picked) return
+  if (!await saveBeforeFileSwitch()) return
   setCurrentFile(picked.filePath)
   setMarkdown(picked.text)
+  lastSavedMarkdown = picked.text
+  updateDocumentSaveState()
   workspaceRoot = parentDirectoryFromPath(picked.filePath)
   expandedTreeDirectories.clear()
   expandedTreeDirectories.add(workspaceRoot)
@@ -1345,8 +1653,12 @@ async function saveMarkdown() {
   const target = currentFile ?? await pickSavePath('文档.md', [{ name: 'Markdown', extensions: ['md'] }])
   if (!target) return
   try {
-    await writeTextFile(target, markdown)
+    const content = markdown
+    setDocumentSaveState('saving')
+    await writeMarkdownFile(target, content)
     setCurrentFile(target)
+    if (markdown === content) lastSavedMarkdown = content
+    updateDocumentSaveState()
     if (!workspaceRoot) {
       workspaceRoot = parentDirectoryFromPath(target)
       rememberRecentFolder(workspaceRoot)
@@ -1357,6 +1669,7 @@ async function saveMarkdown() {
     setStatus(`已保存到 ${target}`)
     showToast('已保存', 'success')
   } catch (err) {
+    setDocumentSaveState('error')
     setStatus(`保存失败：${errMsg(err)}`)
     showToast(`保存失败：${errMsg(err)}`, 'error')
   }
@@ -1366,8 +1679,12 @@ async function saveMarkdownAs() {
   const target = await pickSavePath(currentFile ? fileNameFromPath(currentFile) : '文档.md', [{ name: 'Markdown', extensions: ['md'] }])
   if (!target) return
   try {
-    await writeTextFile(target, markdown)
+    const content = markdown
+    setDocumentSaveState('saving')
+    await writeMarkdownFile(target, content)
     setCurrentFile(target)
+    if (markdown === content) lastSavedMarkdown = content
+    updateDocumentSaveState()
     if (!workspaceRoot) {
       workspaceRoot = parentDirectoryFromPath(target)
       rememberRecentFolder(workspaceRoot)
@@ -1376,6 +1693,7 @@ async function saveMarkdownAs() {
     setStatus(`已另存为 ${target}`)
     showToast('已另存为', 'success')
   } catch (err) {
+    setDocumentSaveState('error')
     showToast(`另存失败：${errMsg(err)}`, 'error')
   }
 }
@@ -1399,6 +1717,8 @@ async function convertOfficeToMarkdown(kind: 'docx' | 'xlsx') {
     await writeTextFile(target, md)
     setCurrentFile(target)
     setMarkdown(md)
+    lastSavedMarkdown = md
+    updateDocumentSaveState()
     setStatus(`已把 ${label} 文件转换成 Markdown`)
     showToast(`已把 ${label} 转成 Markdown`, 'success')
   } catch (err) {
@@ -1426,6 +1746,8 @@ async function exportHtml() {
     await writeTextFile(target, html)
     setMarkdown(picked.text)
     setCurrentFile(picked.filePath)
+    lastSavedMarkdown = picked.text
+    updateDocumentSaveState()
     setStatus(`已导出 HTML 到 ${target}`)
     showToast('已导出 HTML', 'success')
   } catch (err) {
@@ -1454,6 +1776,8 @@ async function exportDocx() {
     await writeBytesFile(target, bytes)
     setMarkdown(picked.text)
     setCurrentFile(picked.filePath)
+    lastSavedMarkdown = picked.text
+    updateDocumentSaveState()
     setStatus(`已导出 Word 到 ${target}`)
     showToast('已导出 Word', 'success')
   } catch (err) {
@@ -1641,6 +1965,11 @@ editor.addEventListener('keydown', (e) => {
 })
 
 document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    void saveMarkdown().catch((error) => showToast(`保存失败：${errMsg(error)}`, 'error'))
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && undoMarkdown()) {
     e.preventDefault()
     return
@@ -1685,6 +2014,8 @@ function toggleConversionMenu(open: boolean) {
 
 conversionBtn.addEventListener('click', (event) => {
   event.stopPropagation()
+  toggleFileMenu(false)
+  toggleSettingsMenu(false)
   toggleConversionMenu(!isConversionMenuOpen())
 })
 conversionMenu.addEventListener('click', () => toggleConversionMenu(false))
@@ -1789,16 +2120,46 @@ function toggleSettingsMenu(open: boolean) {
   settingsBtn.setAttribute('aria-expanded', String(open))
 }
 
+function setSettingsView(name: string) {
+  document.querySelectorAll<HTMLButtonElement>('[data-settings-view]').forEach((button) => {
+    button.setAttribute('aria-selected', String(button.dataset.settingsView === name))
+  })
+  document.querySelectorAll<HTMLElement>('[data-settings-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== name
+  })
+  document.querySelectorAll<HTMLElement>('[data-settings-group]').forEach((element) => {
+    element.hidden = element.dataset.settingsGroup !== name
+  })
+}
+
+function openSettings(view = 'overview') {
+  toggleFileMenu(false)
+  toggleConversionMenu(false)
+  toggleSettingsMenu(false)
+  setSettingsView(view)
+  if (!appearanceDialog.open) appearanceDialog.showModal()
+}
+
 settingsBtn.addEventListener('click', (e) => {
   e.stopPropagation()
-  toggleSettingsMenu(!isMenuOpen())
+  openSettings('overview')
 })
 
 appearanceSettingsBtn.addEventListener('click', (e) => {
   e.stopPropagation()
-  toggleSettingsMenu(false)
-  if (!appearanceDialog.open) appearanceDialog.showModal()
+  openSettings('overview')
 })
+
+document.querySelectorAll<HTMLButtonElement>('[data-settings-view]').forEach((button) => {
+  button.addEventListener('click', () => setSettingsView(button.dataset.settingsView || 'overview'))
+})
+document.querySelectorAll<HTMLButtonElement>('[data-settings-target]').forEach((button) => {
+  button.addEventListener('click', () => setSettingsView(button.dataset.settingsTarget || 'overview'))
+})
+themeModeButtons.forEach((button) => {
+  button.addEventListener('click', () => updateAppearance({ themeMode: (button.dataset.themeMode || 'system') as AppearanceSettings['themeMode'] }))
+})
+checkUpdatesBtn?.addEventListener('click', () => void checkForUpdate(true))
 
 appearanceDialog.addEventListener('click', (e) => {
   if (e.target === appearanceDialog) appearanceDialog.close()
@@ -1815,17 +2176,29 @@ backgroundOpacityInput.addEventListener('input', () => {
 panelOpacityInput.addEventListener('input', () => {
   updateAppearance({ panelOpacity: Number(panelOpacityInput.value) })
 })
+codeBlockColorInput.addEventListener('input', () => {
+  updateAppearance({ codeBlockColor: codeBlockColorInput.value })
+})
 codeBlockOpacityInput.addEventListener('input', () => {
   updateAppearance({ codeBlockOpacity: Number(codeBlockOpacityInput.value) })
 })
-adaptiveContrastToggle.addEventListener('click', () => {
-  updateAppearance({ adaptiveContrastEnabled: !appearanceSettings.adaptiveContrastEnabled })
+autoSaveIntervalInput.addEventListener('input', () => {
+  updateAppearance({ autoSaveIntervalSeconds: Number(autoSaveIntervalInput.value) })
 })
-quickAdaptiveContrastBtn.addEventListener('click', () => {
-  updateAppearance({ adaptiveContrastEnabled: !appearanceSettings.adaptiveContrastEnabled })
+autoSaveWindowBlurToggle.addEventListener('click', () => {
+  updateAppearance({ autoSaveOnWindowBlur: !appearanceSettings.autoSaveOnWindowBlur })
+})
+autoSaveFileSwitchToggle.addEventListener('click', () => {
+  updateAppearance({ autoSaveOnFileSwitch: !appearanceSettings.autoSaveOnFileSwitch })
 })
 panelBlurToggle.addEventListener('click', () => {
   updateAppearance({ panelBlurEnabled: !appearanceSettings.panelBlurEnabled })
+})
+topbarBlurToggle.addEventListener('click', () => {
+  updateAppearance({ topbarBlurEnabled: !appearanceSettings.topbarBlurEnabled })
+})
+statusbarBlurToggle.addEventListener('click', () => {
+  updateAppearance({ statusbarBlurEnabled: !appearanceSettings.statusbarBlurEnabled })
 })
 buttonTextColorInput.addEventListener('input', () => {
   updateAppearance({ buttonTextColor: buttonTextColorInput.value })
@@ -1873,6 +2246,86 @@ clearBackgroundBtn.addEventListener('click', async () => {
   }
 })
 
+chooseAppIconBtn.addEventListener('click', async () => {
+  if (!isTauri()) {
+    showToast('自定义软件图标需要桌面版应用', 'info')
+    return
+  }
+  const source = await pickFilePath([{ name: '软件图标', extensions: ['png', 'ico'] }])
+  if (!source) return
+  setBusy(true)
+  try {
+    const installedPath = await installCustomAppIcon(source)
+    await applyAppIconPath(installedPath)
+    localStorage.setItem('markflow:customAppIconName', fileNameFromPath(source))
+    updateIconLabels()
+    showToast('软件图标已应用', 'success')
+  } catch (err) {
+    showToast(`应用软件图标失败：${errMsg(err)}`, 'error')
+  } finally {
+    setBusy(false)
+  }
+})
+
+clearAppIconBtn.addEventListener('click', async () => {
+  if (!isTauri()) return
+  setBusy(true)
+  try {
+    await clearCustomIcon('app')
+    await applyAppIconPath(await getIconPath('app'))
+    localStorage.removeItem('markflow:customAppIconName')
+    updateIconLabels()
+    showToast('软件图标已恢复默认', 'success')
+  } catch (err) {
+    showToast(`恢复软件图标失败：${errMsg(err)}`, 'error')
+  } finally {
+    setBusy(false)
+  }
+})
+
+chooseFileIconBtn.addEventListener('click', async () => {
+  if (!isTauri()) {
+    showToast('自定义文件图标需要桌面版应用', 'info')
+    return
+  }
+  const source = await pickFilePath([{ name: 'Windows 文件图标', extensions: ['ico'] }])
+  if (!source) return
+  setBusy(true)
+  try {
+    await installCustomFileIcon(source)
+    localStorage.setItem('markflow:customFileIconName', fileNameFromPath(source))
+    updateIconLabels()
+    try {
+      await registerMdHandler()
+      showToast('Markdown 文件图标已应用并重新注册', 'success')
+      setStatus('已应用自定义 Markdown 文件图标')
+    } catch {
+      showToast('文件图标已保存，请重新注册 Markdown 文件关联', 'info')
+      setStatus('文件图标已保存，等待重新注册文件关联')
+    }
+  } catch (err) {
+    showToast(`应用文件图标失败：${errMsg(err)}`, 'error')
+  } finally {
+    setBusy(false)
+  }
+})
+
+clearFileIconBtn.addEventListener('click', async () => {
+  if (!isTauri()) return
+  setBusy(true)
+  try {
+    await clearCustomIcon('file')
+    localStorage.removeItem('markflow:customFileIconName')
+    updateIconLabels()
+    try { await registerMdHandler() } catch { /* 非 Windows 平台没有文件关联注册 */ }
+    showToast('Markdown 文件图标已恢复默认', 'success')
+  } catch (err) {
+    showToast(`恢复文件图标失败：${errMsg(err)}`, 'error')
+  } finally {
+    setBusy(false)
+  }
+})
+
 resetAppearanceBtn.addEventListener('click', async () => {
   appearanceSettings = { ...DEFAULT_APPEARANCE }
   applyAppearance(appearanceSettings)
@@ -1880,13 +2333,26 @@ resetAppearanceBtn.addEventListener('click', async () => {
   showBackgroundAsset(null)
   try {
     await clearBackgroundAsset()
+    if (isTauri()) {
+      await clearCustomIcon('app')
+      await clearCustomIcon('file')
+      await applyAppIconPath(await getIconPath('app'))
+    }
+    localStorage.removeItem('markflow:customAppIconName')
+    localStorage.removeItem('markflow:customFileIconName')
+    updateIconLabels()
     showToast('外观已恢复默认', 'success')
   } catch (err) {
     showToast(`外观已恢复，背景存储清理失败：${errMsg(err)}`, 'error')
   }
 })
 
+window.addEventListener('blur', () => {
+  if (appearanceSettings.autoSaveOnWindowBlur) void autoSaveCurrentFile('window-blur')
+})
+
 document.addEventListener('visibilitychange', () => {
+  if (document.hidden && appearanceSettings.autoSaveOnWindowBlur) void autoSaveCurrentFile('window-blur')
   if (!customBackground.classList.contains('has-video')) return
   if (document.hidden || appearanceSettings.backgroundOpacity === 0) backgroundVideo.pause()
   else void backgroundVideo.play().catch(() => undefined)
@@ -1972,13 +2438,107 @@ preview.addEventListener('dblclick', (e) => {
 let scrollSyncSource: HTMLElement | null = null
 let scrollSyncFrame: number | null = null
 
+function editorLineHeight() {
+  const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight)
+  return Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 24.5
+}
+
+function editorSourceLineAtScroll() {
+  return Math.min(markdownLineCount(), editor.scrollTop / editorLineHeight() + 1)
+}
+
+function updatePreviewScrollAnchors() {
+  if (previewAnchorFrame !== null) {
+    cancelAnimationFrame(previewAnchorFrame)
+    previewAnchorFrame = null
+  }
+  const editorPaddingTop = Number.parseFloat(getComputedStyle(editor).paddingTop) || 0
+  const editorScrollTail = Math.max(0, editor.clientHeight - editorPaddingTop * 2 - editorLineHeight())
+  document.documentElement.style.setProperty('--editor-scroll-sync-tail', `${editorScrollTail}px`)
+  const gutterScrollExtra = Math.max(0, editorLineNumbers.clientHeight - editor.clientHeight)
+  document.documentElement.style.setProperty('--gutter-scroll-sync-extra', `${gutterScrollExtra}px`)
+  document.documentElement.style.setProperty('--preview-scroll-sync-tail', '0px')
+  const previewRect = preview.getBoundingClientRect()
+  const previewStyle = getComputedStyle(preview)
+  const previewPaddingTop = Number.parseFloat(previewStyle.paddingTop) || 0
+  const previewPaddingBottom = Number.parseFloat(previewStyle.paddingBottom) || 0
+  const byLine = new Map<number, number>()
+
+  preview.querySelectorAll<HTMLElement>('[data-source-line]').forEach((element) => {
+    const line = Number.parseInt(element.dataset.sourceLine || '', 10)
+    if (!Number.isFinite(line) || byLine.has(line)) return
+    const top = element.getBoundingClientRect().top - previewRect.top + preview.scrollTop - previewPaddingTop
+    byLine.set(line, Math.max(0, top))
+  })
+
+  const lastContentTop = [...byLine.values()].at(-1) || 0
+  const lastContentElement = preview.lastElementChild as HTMLElement | null
+  const lastContentMarginBottom = lastContentElement
+    ? Number.parseFloat(getComputedStyle(lastContentElement).marginBottom) || 0
+    : 0
+  const naturalContentEnd = lastContentElement
+    ? lastContentElement.getBoundingClientRect().bottom - previewRect.top
+      + preview.scrollTop + lastContentMarginBottom + previewPaddingBottom
+    : 0
+  const previewScrollTail = Math.max(0, preview.clientHeight + lastContentTop - naturalContentEnd)
+  document.documentElement.style.setProperty('--preview-scroll-sync-tail', `${previewScrollTail}px`)
+  const maxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight)
+  byLine.forEach((top, line) => byLine.set(line, Math.min(maxScroll, top)))
+
+  if (!byLine.has(1)) byLine.set(1, 0)
+  previewScrollAnchors = [...byLine]
+    .map(([line, top]) => ({ line, top }))
+    .sort((a, b) => a.line - b.line || a.top - b.top)
+
+  const last = previewScrollAnchors.at(-1)
+  if (!last || last.top < maxScroll) {
+    previewScrollAnchors.push({ line: markdownLineCount() + 1, top: maxScroll })
+  }
+}
+
+function schedulePreviewScrollAnchors() {
+  if (previewAnchorFrame !== null) return
+  previewAnchorFrame = requestAnimationFrame(() => {
+    previewAnchorFrame = null
+    updatePreviewScrollAnchors()
+  })
+}
+
+function interpolateAnchor(value: number, input: 'line' | 'top', output: 'line' | 'top') {
+  if (!previewScrollAnchors.length) return 0
+  const first = previewScrollAnchors[0]
+  if (value <= first[input]) return first[output]
+  for (let index = 1; index < previewScrollAnchors.length; index += 1) {
+    const upper = previewScrollAnchors[index]
+    if (value > upper[input]) continue
+    const lower = previewScrollAnchors[index - 1]
+    const inputRange = upper[input] - lower[input]
+    const ratio = inputRange > 0 ? (value - lower[input]) / inputRange : 0
+    return lower[output] + ratio * (upper[output] - lower[output])
+  }
+  return previewScrollAnchors.at(-1)![output]
+}
+
+function previewOffsetForSourceLine(line: number) {
+  return interpolateAnchor(line, 'line', 'top')
+}
+
+function sourceLineForPreviewOffset(top: number) {
+  return interpolateAnchor(top, 'top', 'line')
+}
+
 function syncScroll(source: HTMLElement, target: HTMLElement) {
   if (restoringZoomScroll) return
   if (scrollSyncSource && scrollSyncSource !== source) return
-  const sourceRange = source.scrollHeight - source.clientHeight
-  const targetRange = target.scrollHeight - target.clientHeight
   scrollSyncSource = source
-  target.scrollTop = sourceRange > 0 ? (source.scrollTop / sourceRange) * targetRange : 0
+  if (source === editor) {
+    syncEditorLineNumbers()
+    target.scrollTop = previewOffsetForSourceLine(editorSourceLineAtScroll())
+  } else {
+    const sourceLine = sourceLineForPreviewOffset(source.scrollTop)
+    target.scrollTop = Math.max(0, (sourceLine - 1) * editorLineHeight())
+    syncEditorLineNumbers()
+  }
   if (scrollSyncFrame !== null) cancelAnimationFrame(scrollSyncFrame)
   scrollSyncFrame = requestAnimationFrame(() => {
     scrollSyncSource = null
@@ -1986,8 +2546,33 @@ function syncScroll(source: HTMLElement, target: HTMLElement) {
   })
 }
 
+const scrollActivityTimers = new WeakMap<HTMLElement, number>()
+
+function showScrollbarsForActivity(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return
+  const isScrollSurface = target === editor
+    || target === preview
+    || target === fileTree
+    || target.matches('.settings-content, .appearance-body, #preview pre, #preview .code-scroll')
+  if (!isScrollSurface) return
+
+  target.classList.add('is-scrolling')
+  const previousTimer = scrollActivityTimers.get(target)
+  if (previousTimer !== undefined) window.clearTimeout(previousTimer)
+  const timer = window.setTimeout(() => {
+    target.classList.remove('is-scrolling')
+    scrollActivityTimers.delete(target)
+  }, 3000)
+  scrollActivityTimers.set(target, timer)
+}
+
 editor.addEventListener('scroll', () => syncScroll(editor, preview))
 preview.addEventListener('scroll', () => syncScroll(preview, editor))
+document.addEventListener('scroll', (event) => showScrollbarsForActivity(event.target), true)
+window.addEventListener('resize', schedulePreviewScrollAnchors)
+const paneResizeObserver = new ResizeObserver(schedulePreviewScrollAnchors)
+paneResizeObserver.observe(editor)
+paneResizeObserver.observe(preview)
 
 // ---------- 可拖拽分栏（编辑器 / 预览宽度） ----------
 
@@ -2061,6 +2646,11 @@ splitter.addEventListener('mousedown', (e) => {
   e.preventDefault()
   startDrag(e.clientX)
 })
+splitter.addEventListener('mousemove', (event) => {
+  const bounds = splitter.getBoundingClientRect()
+  const handleY = Math.min(bounds.height - 18, Math.max(18, event.clientY - bounds.top))
+  splitter.style.setProperty('--splitter-handle-y', `${handleY}px`)
+})
 
 function startFileTreeDrag(clientX: number) {
   fileTreeSplitter.classList.add('dragging')
@@ -2103,6 +2693,9 @@ async function init() {
       const text = await readTextFile(launchFile)
       setCurrentFile(launchFile)
       setMarkdown(text)
+      lastSavedMarkdown = text
+      updateDocumentSaveState()
+      await renderWorkspaceTree()
       setStatus(`已打开 ${currentFile}`)
       return
     }
@@ -2110,11 +2703,16 @@ async function init() {
     setStatus(`打开传入文件失败：${errMsg(err)}`)
   }
   restoreSession()
+  await renderWorkspaceTree()
   setStatus('就绪')
 }
 
 applyAppearance(appearanceSettings)
-enableAdaptiveButtonLabels()
+void restoreConfiguredIcons()
+const systemThemeMedia = window.matchMedia?.('(prefers-color-scheme: dark)')
+systemThemeMedia?.addEventListener('change', () => {
+  if (appearanceSettings.themeMode === 'system') applyAppearance(appearanceSettings)
+})
 void restoreBackground()
 void init()
 setTimeout(() => void checkForUpdate(), 1200)

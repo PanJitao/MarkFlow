@@ -8,7 +8,7 @@
 
 Markdown、Word、Excel、HTML 的转换、编辑、预览和文件夹管理都在一个桌面应用中完成。
 
-[![Version](https://img.shields.io/badge/version-0.3.16-1f7a8c.svg)](https://github.com/PanJitao/word-to-markdown/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.3.21-1f7a8c.svg)](https://github.com/PanJitao/word-to-markdown/releases/latest)
 ![Tauri](https://img.shields.io/badge/desktop-Tauri%20v2-24c8db.svg)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3a6ea5.svg)
 [![License](https://img.shields.io/badge/license-MIT-4c956c.svg)](LICENSE)
@@ -23,7 +23,7 @@ Markdown、Word、Excel、HTML 的转换、编辑、预览和文件夹管理都�
 
 MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown 源码编辑与实时预览，支持 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word 或独立 HTML。打开文件夹后，可在左侧文件树中浏览 Markdown 和图片资源。
 
-当前源码版本为 `0.3.16`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
+当前源码版本为 `0.3.21`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
 
 ## 截图
 
@@ -159,7 +159,7 @@ npm run tauri -- build --bundles nsis
 Windows NSIS 安装程序输出至：
 
 ```text
-src-tauri/target/release/bundle/nsis/MarkFlow_0.3.16_x64-setup.exe
+src-tauri/target/release/bundle/nsis/MarkFlow_0.3.21_x64-setup.exe
 ```
 
 ## 项目结构

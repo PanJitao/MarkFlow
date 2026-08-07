@@ -1,10 +1,18 @@
+export type ThemeMode = 'light' | 'dark' | 'system'
+
 export interface AppearanceSettings {
+  themeMode: ThemeMode
   backgroundColor: string
   backgroundOpacity: number
   panelOpacity: number
+  codeBlockColor: string
   codeBlockOpacity: number
-  adaptiveContrastEnabled: boolean
+  autoSaveIntervalSeconds: number
+  autoSaveOnWindowBlur: boolean
+  autoSaveOnFileSwitch: boolean
   panelBlurEnabled: boolean
+  topbarBlurEnabled: boolean
+  statusbarBlurEnabled: boolean
   buttonTextColor: string
   editorColor: string
   previewColor: string
@@ -17,15 +25,28 @@ export interface StoredBackgroundAsset {
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
-  backgroundColor: '#efe4d6',
+  themeMode: 'system',
+  backgroundColor: '#e7e7e7',
   backgroundOpacity: 100,
   panelOpacity: 94,
+  codeBlockColor: '#0f172a',
   codeBlockOpacity: 36,
-  adaptiveContrastEnabled: true,
+  autoSaveIntervalSeconds: 5,
+  autoSaveOnWindowBlur: true,
+  autoSaveOnFileSwitch: true,
   panelBlurEnabled: true,
-  buttonTextColor: '#20262e',
-  editorColor: '#1f1b15',
-  previewColor: '#282016',
+  topbarBlurEnabled: true,
+  statusbarBlurEnabled: true,
+  buttonTextColor: '#555555',
+  editorColor: '#1a1a1a',
+  previewColor: '#1a1a1a',
+}
+
+const LEGACY_DEFAULT_COLORS = {
+  backgroundColor: new Set(['#eaf0ed', '#efe4d6']),
+  buttonTextColor: new Set(['#53646b', '#20262e']),
+  editorColor: new Set(['#17232b', '#1f1b15']),
+  previewColor: new Set(['#17232b', '#282016']),
 }
 
 const SETTINGS_KEY = 'exchangemd:appearance'
@@ -38,6 +59,11 @@ const isColor = (value: unknown): value is string => (
   typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
 )
 
+const loadColor = (value: unknown, legacy: Set<string>, fallback: string) => {
+  if (!isColor(value) || legacy.has(value.toLowerCase())) return fallback
+  return value
+}
+
 const clamp = (value: unknown, min: number, max: number, fallback: number) => {
   const number = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback
@@ -48,19 +74,33 @@ export function loadAppearanceSettings(): AppearanceSettings {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null') as Partial<AppearanceSettings> | null
     if (!saved) return { ...DEFAULT_APPEARANCE }
     return {
-      backgroundColor: isColor(saved.backgroundColor) ? saved.backgroundColor : DEFAULT_APPEARANCE.backgroundColor,
+      themeMode: saved.themeMode === 'light' || saved.themeMode === 'dark' || saved.themeMode === 'system'
+        ? saved.themeMode
+        : DEFAULT_APPEARANCE.themeMode,
+      backgroundColor: loadColor(saved.backgroundColor, LEGACY_DEFAULT_COLORS.backgroundColor, DEFAULT_APPEARANCE.backgroundColor),
       backgroundOpacity: clamp(saved.backgroundOpacity, 0, 100, DEFAULT_APPEARANCE.backgroundOpacity),
       panelOpacity: clamp(saved.panelOpacity, 5, 100, DEFAULT_APPEARANCE.panelOpacity),
+      codeBlockColor: isColor(saved.codeBlockColor) ? saved.codeBlockColor : DEFAULT_APPEARANCE.codeBlockColor,
       codeBlockOpacity: clamp(saved.codeBlockOpacity, 0, 100, DEFAULT_APPEARANCE.codeBlockOpacity),
-      adaptiveContrastEnabled: typeof saved.adaptiveContrastEnabled === 'boolean'
-        ? saved.adaptiveContrastEnabled
-        : DEFAULT_APPEARANCE.adaptiveContrastEnabled,
+      autoSaveIntervalSeconds: clamp(saved.autoSaveIntervalSeconds, 3, 10, DEFAULT_APPEARANCE.autoSaveIntervalSeconds),
+      autoSaveOnWindowBlur: typeof saved.autoSaveOnWindowBlur === 'boolean'
+        ? saved.autoSaveOnWindowBlur
+        : DEFAULT_APPEARANCE.autoSaveOnWindowBlur,
+      autoSaveOnFileSwitch: typeof saved.autoSaveOnFileSwitch === 'boolean'
+        ? saved.autoSaveOnFileSwitch
+        : DEFAULT_APPEARANCE.autoSaveOnFileSwitch,
       panelBlurEnabled: typeof saved.panelBlurEnabled === 'boolean'
         ? saved.panelBlurEnabled
         : DEFAULT_APPEARANCE.panelBlurEnabled,
-      buttonTextColor: isColor(saved.buttonTextColor) ? saved.buttonTextColor : DEFAULT_APPEARANCE.buttonTextColor,
-      editorColor: isColor(saved.editorColor) ? saved.editorColor : DEFAULT_APPEARANCE.editorColor,
-      previewColor: isColor(saved.previewColor) ? saved.previewColor : DEFAULT_APPEARANCE.previewColor,
+      topbarBlurEnabled: typeof saved.topbarBlurEnabled === 'boolean'
+        ? saved.topbarBlurEnabled
+        : DEFAULT_APPEARANCE.topbarBlurEnabled,
+      statusbarBlurEnabled: typeof saved.statusbarBlurEnabled === 'boolean'
+        ? saved.statusbarBlurEnabled
+        : DEFAULT_APPEARANCE.statusbarBlurEnabled,
+      buttonTextColor: loadColor(saved.buttonTextColor, LEGACY_DEFAULT_COLORS.buttonTextColor, DEFAULT_APPEARANCE.buttonTextColor),
+      editorColor: loadColor(saved.editorColor, LEGACY_DEFAULT_COLORS.editorColor, DEFAULT_APPEARANCE.editorColor),
+      previewColor: loadColor(saved.previewColor, LEGACY_DEFAULT_COLORS.previewColor, DEFAULT_APPEARANCE.previewColor),
     }
   } catch {
     return { ...DEFAULT_APPEARANCE }

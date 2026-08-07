@@ -9,6 +9,7 @@ use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::ipc::Response;
+use tauri::Manager;
 
 const PROG_ID: &str = "ExchangeMD.md";
 const APP_NAME: &str = "MarkFlow.exe";
@@ -219,29 +220,131 @@ fn open_default_apps_settings() -> Result<(), String> {
     }
 }
 
+fn custom_icon_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取图标存储目录：{e}"))?;
+    fs::create_dir_all(&directory).map_err(|e| format!("无法创建图标存储目录：{e}"))?;
+    Ok(directory.join(name))
+}
+
+fn validate_icon_source(source: &str, extensions: &[&str]) -> Result<PathBuf, String> {
+    let path = PathBuf::from(source);
+    if !path.is_file() {
+        return Err("找不到所选图标文件".into());
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| "图标文件缺少扩展名".to_string())?;
+    if !extensions.iter().any(|allowed| *allowed == extension) {
+        return Err(format!("仅支持 {} 图标文件", extensions.join("、")));
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn install_custom_app_icon(app: tauri::AppHandle, source: String) -> Result<String, String> {
+    let source_path = validate_icon_source(&source, &["png", "ico"])?;
+    let extension = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    let target = custom_icon_path(&app, &format!("custom-app-icon.{extension}"))?;
+    let other_extension = if extension == "png" { "ico" } else { "png" };
+    let _ = fs::remove_file(custom_icon_path(&app, &format!("custom-app-icon.{other_extension}"))?);
+    fs::copy(source_path, &target).map_err(|e| format!("保存应用图标失败：{e}"))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn install_custom_file_icon(app: tauri::AppHandle, source: String) -> Result<String, String> {
+    let source_path = validate_icon_source(&source, &["ico"])?;
+    let target = custom_icon_path(&app, "custom-file-icon.ico")?;
+    fs::copy(source_path, &target).map_err(|e| format!("保存文件图标失败：{e}"))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn clear_custom_icon(app: tauri::AppHandle, kind: String) -> Result<(), String> {
+    let names: &[&str] = match kind.as_str() {
+        "app" => &["custom-app-icon.png", "custom-app-icon.ico"],
+        "file" => &["custom-file-icon.ico"],
+        _ => return Err("未知图标类型".into()),
+    };
+    for name in names {
+        let path = custom_icon_path(&app, name)?;
+        let _ = fs::remove_file(path);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_icon_path(app: tauri::AppHandle, kind: String) -> Result<String, String> {
+    let custom_names: &[&str] = match kind.as_str() {
+        "app" => &["custom-app-icon.png", "custom-app-icon.ico"],
+        "file" => &["custom-file-icon.ico"],
+        _ => return Err("未知图标类型".into()),
+    };
+    for name in custom_names {
+        let path = custom_icon_path(&app, name)?;
+        if path.is_file() {
+            return Ok(path.to_string_lossy().to_string());
+        }
+    }
+    let bundled_name = if kind == "app" { "icon.png" } else { "markdown-document.ico" };
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("无法获取应用资源目录：{e}"))?
+        .join("icons")
+        .join(bundled_name);
+    if bundled.is_file() {
+        Ok(bundled.to_string_lossy().to_string())
+    } else {
+        Err(format!("找不到默认图标：{}", bundled.display()))
+    }
+}
+
 /// 把 MarkFlow 注册进 .md 的「打开方式」列表（仅 Windows；HKCU，无需管理员）
 #[cfg(windows)]
 #[tauri::command]
-fn register_md_handler() -> Result<String, String> {
-    register_md_handler_windows()
+fn register_md_handler(app: tauri::AppHandle) -> Result<String, String> {
+    register_md_handler_windows(&app)
 }
 
 #[cfg(not(windows))]
 #[tauri::command]
-fn register_md_handler() -> Result<String, String> {
+fn register_md_handler(_app: tauri::AppHandle) -> Result<String, String> {
     Err("文件关联注册目前仅在 Windows 上支持".into())
 }
 
 // ---------- Windows 文件关联实现 ----------
 
 #[cfg(windows)]
-fn register_md_handler_windows() -> Result<String, String> {
+fn register_md_handler_windows(app: &tauri::AppHandle) -> Result<String, String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("无法获取程序路径：{e}"))?
         .to_string_lossy()
         .to_string();
     let open_cmd = format!("\"{}\" \"%1\"", exe);
-    let icon = format!("\"{}\",0", exe);
+    let custom_file_icon = custom_icon_path(app, "custom-file-icon.ico")?;
+    let icon_path = if custom_file_icon.is_file() {
+        custom_file_icon
+    } else {
+        app.path()
+            .resource_dir()
+            .map_err(|e| format!("无法获取应用资源目录：{e}"))?
+            .join("icons")
+            .join("markdown-document.ico")
+    };
+    if !icon_path.is_file() {
+        return Err(format!("找不到 Markdown 文件图标：{}", icon_path.display()));
+    }
+    let icon = format!("\"{}\",0", icon_path.to_string_lossy());
 
     let base = format!("HKCU\\Software\\Classes\\{}", PROG_ID);
 
@@ -366,6 +469,10 @@ fn main() {
             new_window,
             get_launch_file,
             register_md_handler,
+            install_custom_app_icon,
+            install_custom_file_icon,
+            clear_custom_icon,
+            get_icon_path,
             open_default_apps_settings,
             open_url,
         ])

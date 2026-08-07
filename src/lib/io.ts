@@ -81,6 +81,24 @@ export function registerMdHandler(): Promise<string> {
   return invoke<string>('register_md_handler')
 }
 
+/** 复制用户自定义应用图标到应用数据目录。支持 PNG / ICO。 */
+export function installCustomAppIcon(source: string): Promise<string> {
+  return invoke<string>('install_custom_app_icon', { source })
+}
+
+/** 复制用户自定义 Markdown 文件图标到应用数据目录。Windows 使用 ICO。 */
+export function installCustomFileIcon(source: string): Promise<string> {
+  return invoke<string>('install_custom_file_icon', { source })
+}
+
+export function clearCustomIcon(kind: 'app' | 'file'): Promise<void> {
+  return invoke<void>('clear_custom_icon', { kind })
+}
+
+export function getIconPath(kind: 'app' | 'file'): Promise<string> {
+  return invoke<string>('get_icon_path', { kind })
+}
+
 /** 打开系统「默认应用」设置页 */
 export function openDefaultAppsSettings(): Promise<void> {
   return invoke<void>('open_default_apps_settings')

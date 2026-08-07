@@ -8,10 +8,18 @@ const renderer = new MarkdownIt({
   breaks: true,
 })
 
+renderer.core.ruler.push('source-line-attributes', (state) => {
+  if (!state.env?.sourceMap) return
+  state.tokens.forEach((token) => {
+    if (!token.map || token.type === 'inline' || token.nesting === -1) return
+    token.attrSet('data-source-line', String(token.map[0] + 1))
+  })
+})
+
 /** 把 Markdown 渲染成预览用的 HTML（经过消毒，防 XSS） */
 export function renderMarkdown(markdown: string): string {
-  return DOMPurify.sanitize(renderer.render(markdown), {
-    ADD_ATTR: ['style', 'target'],
+  return DOMPurify.sanitize(renderer.render(markdown, { sourceMap: true }), {
+    ADD_ATTR: ['style', 'target', 'data-source-line'],
   })
 }
 

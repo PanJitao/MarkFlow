@@ -14,7 +14,7 @@
 
     <div id="app">
       <header class="window-titlebar">
-        <span id="window-title" class="window-title adaptive-contrast" data-tauri-drag-region>MarkFlow 文档转换工作台</span>
+        <span id="window-title" class="window-title" data-tauri-drag-region>MarkFlow 文档转换工作台</span>
         <div class="window-controls" aria-label="窗口控制">
           <button id="window-minimize-btn" class="window-control" type="button" aria-label="最小化" title="最小化">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -31,6 +31,12 @@
         <nav class="actions" aria-label="文件与转换操作">
           <button id="file-tree-toggle-btn" class="file-tree-toggle-btn" type="button" aria-controls="file-tree-panel" aria-expanded="true" title="收起文件树">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM9 4v16M12 9h5M12 13h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>文件树</span>
+          </button>
+          <button id="editor-toggle-btn" aria-controls="editor-panel" aria-expanded="true" title="隐藏编辑区">
+            <svg class="editor-hide-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 3v18M16 9l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="editor-show-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 3v18M13 9l3 3-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span id="editor-toggle-label">隐藏编辑区</span>
           </button>
           <div class="file-wrap">
             <button id="file-btn" title="文件" aria-haspopup="menu" aria-expanded="false">
@@ -72,16 +78,8 @@
         </nav>
 
         <div class="topbar-end" aria-label="视图与设置">
-          <button id="editor-toggle-btn" aria-controls="editor-panel" aria-expanded="true" title="隐藏编辑区">
-            <svg class="editor-hide-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 3v18M16 9l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <svg class="editor-show-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 3v18M13 9l3 3-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span id="editor-toggle-label">隐藏编辑区</span>
-          </button>
-          <button id="quick-adaptive-contrast-btn" class="quick-adaptive-contrast-btn icon-only" type="button" aria-label="自动反色显示" aria-pressed="true" title="自动反色显示：开启">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18V3z" fill="currentColor"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-          </button>
           <div class="settings-wrap">
-            <button id="settings-btn" class="settings-btn icon-only" title="设置" aria-label="设置" aria-haspopup="menu" aria-expanded="false">
+            <button id="settings-btn" class="settings-btn icon-only" title="设置" aria-label="设置" aria-haspopup="dialog" aria-expanded="false">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
             <div id="settings-menu" class="settings-menu" role="menu" aria-label="系统设置">
@@ -130,7 +128,10 @@
             <h2>编辑器</h2>
             <span id="file-label">未保存的草稿 · Markdown 源码</span>
           </div>
-          <textarea id="editor" spellcheck="false" placeholder="在这里输入 Markdown 内容…" aria-label="Markdown 编辑器"></textarea>
+          <div class="editor-surface">
+            <div id="editor-line-numbers" class="editor-line-numbers" aria-hidden="true"></div>
+            <textarea id="editor" wrap="off" spellcheck="false" placeholder="在这里输入 Markdown 内容…" aria-label="Markdown 编辑器"></textarea>
+          </div>
         </article>
 
         <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="拖动调整编辑器与预览宽度" tabindex="0"></div>
@@ -147,6 +148,10 @@
       <footer class="statusbar">
         <span class="spinner" id="spinner" aria-hidden="true"></span>
         <span id="status" role="status" aria-live="polite">就绪</span>
+        <span class="status-save-info">
+          <span id="save-strategy" class="status-save-strategy">自动保存：每 5 秒 · 窗口失焦 · 切换文件</span>
+          <span id="save-state" class="status-save-state" data-state="unsaved" role="status" aria-live="polite">未保存</span>
+        </span>
         <span class="status-right">
           <span id="word-count">0 字</span>
           <span id="zoom-level" aria-label="内容显示比例 100%">100%</span>
@@ -154,17 +159,62 @@
       </footer>
     </div>
 
-    <dialog id="appearance-dialog" class="appearance-dialog" aria-labelledby="appearance-title">
+    <dialog id="appearance-dialog" class="appearance-dialog settings-dialog" aria-labelledby="appearance-title">
       <form method="dialog">
-        <header class="appearance-header">
-          <h2 id="appearance-title">外观设置</h2>
-          <button class="appearance-close icon-btn" value="close" aria-label="关闭外观设置" title="关闭">
+        <header class="appearance-header settings-dialog-header">
+          <div>
+            <h2 id="appearance-title">设置</h2>
+            <p>自动保存、主题与系统集成分开管理，修改会即时反映到工作区。</p>
+          </div>
+          <button class="appearance-close icon-btn" value="close" aria-label="关闭设置" title="关闭设置">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </header>
 
-        <div class="appearance-body">
-          <div class="appearance-media-row">
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="设置分类">
+            <button type="button" class="settings-nav-item" data-settings-view="overview" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>概览</button>
+            <button type="button" class="settings-nav-item" data-settings-view="autosave" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 4v5h8V4M8 15h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>自动保存</button>
+            <button type="button" class="settings-nav-item" data-settings-view="appearance" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>主题与外观</button>
+            <button type="button" class="settings-nav-item" data-settings-view="system" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 21h8M12 17v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>系统集成</button>
+          </nav>
+
+          <div class="appearance-body settings-content">
+          <section class="settings-panel" data-settings-panel="overview">
+            <div class="settings-panel-header"><div><strong>设置概览</strong><span>把高频行为和视觉偏好拆成独立入口，避免一屏堆叠。</span></div></div>
+            <button type="button" class="settings-link" data-settings-target="autosave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 4v5h8V4M8 15h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span><strong>自动保存</strong><span>循环 5 秒 · 失焦开启 · 切换文件开启</span></span><svg class="settings-link-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button type="button" class="settings-link" data-settings-target="appearance"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span><strong>主题与外观</strong><span>背景、透明度、图标、面板模糊与文字颜色</span></span><svg class="settings-link-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button type="button" class="settings-link" data-settings-target="system"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 21h8M12 17v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span><strong>系统集成</strong><span>文件关联、右键新建、默认打开方式与检查更新</span></span><svg class="settings-link-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          </section>
+
+          <div class="settings-panel-header" data-settings-group="appearance" hidden><div><button type="button" class="settings-back" data-settings-target="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>设置概览</button><strong>主题与外观</strong><span>主题颜色和内容层级保持可读，浅色背景下边框仍清晰可见。</span></div></div>
+          <div class="appearance-control theme-setting" data-settings-group="appearance" hidden>
+            <span class="appearance-label">主题模式</span>
+            <div class="theme-segmented" role="group" aria-label="主题模式"><button type="button" data-theme-mode="light" aria-pressed="true">浅色</button><button type="button" data-theme-mode="dark" aria-pressed="false">深色</button><button type="button" data-theme-mode="system" aria-pressed="false">跟随系统</button></div>
+          </div>
+          <div class="appearance-media-row icon-setting-row" data-settings-group="appearance" hidden>
+            <div class="appearance-media-copy">
+              <span class="appearance-label">软件图标</span>
+              <span id="app-icon-name" class="appearance-value" title="使用内置软件图标">使用内置图标</span>
+              <span class="appearance-hint">支持 PNG / ICO；窗口图标和 favicon 即时生效。</span>
+            </div>
+            <div class="appearance-media-actions">
+              <button type="button" id="choose-app-icon-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM7 15l3-3 2 2 2-2 3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="8" cy="9" r="1.2" fill="currentColor"/></svg>选择</button>
+              <button type="button" id="clear-app-icon-btn" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>恢复</button>
+            </div>
+          </div>
+          <div class="appearance-media-row icon-setting-row" data-settings-group="appearance" hidden>
+            <div class="appearance-media-copy">
+              <span class="appearance-label">Markdown 文件图标</span>
+              <span id="file-icon-name" class="appearance-value" title="使用内置 Markdown 文件图标">使用内置图标</span>
+              <span class="appearance-hint">仅支持 ICO；重新注册文件关联后生效。</span>
+            </div>
+            <div class="appearance-media-actions">
+              <button type="button" id="choose-file-icon-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h9l5 5v13H5zM14 3v6h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 14h8M8 17h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>选择</button>
+              <button type="button" id="clear-file-icon-btn" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>恢复</button>
+            </div>
+          </div>
+          <div class="appearance-media-row" data-settings-group="appearance" hidden>
             <div class="appearance-media-copy">
               <span class="appearance-label">背景素材</span>
               <span id="background-file-name" class="appearance-value" title="未选择背景素材">未选择</span>
@@ -182,12 +232,12 @@
             <input id="background-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm" hidden />
           </div>
 
-          <label class="appearance-control" for="background-color-input">
+          <label class="appearance-control" for="background-color-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">背景底色</span>
-            <input id="background-color-input" class="color-swatch" type="color" value="#efe4d6" />
+            <input id="background-color-input" class="color-swatch" type="color" value="#e7e7e7" />
           </label>
 
-          <label class="appearance-control appearance-range" for="background-opacity-input">
+          <label class="appearance-control appearance-range" for="background-opacity-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">背景不透明度</span>
             <span class="range-wrap">
               <input id="background-opacity-input" type="range" min="0" max="100" step="5" value="100" />
@@ -195,7 +245,7 @@
             </span>
           </label>
 
-          <label class="appearance-control appearance-range" for="panel-opacity-input">
+          <label class="appearance-control appearance-range" for="panel-opacity-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">面板与按钮不透明度</span>
             <span class="range-wrap">
               <input id="panel-opacity-input" type="range" min="5" max="100" step="1" value="94" />
@@ -203,7 +253,12 @@
             </span>
           </label>
 
-          <label class="appearance-control appearance-range" for="code-block-opacity-input">
+          <label class="appearance-control" for="code-block-color-input" data-settings-group="appearance" hidden>
+            <span class="appearance-label">代码块背景颜色</span>
+            <input id="code-block-color-input" class="color-swatch" type="color" value="#0f172a" />
+          </label>
+
+          <label class="appearance-control appearance-range" for="code-block-opacity-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">代码块背景不透明度</span>
             <span class="range-wrap">
               <input id="code-block-opacity-input" type="range" min="0" max="100" step="1" value="36" />
@@ -211,22 +266,46 @@
             </span>
           </label>
 
-          <div class="appearance-control">
-            <span id="adaptive-contrast-label" class="appearance-label">自动反色显示</span>
+          <div class="settings-panel-header" data-settings-group="autosave" hidden><div><button type="button" class="settings-back" data-settings-target="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>设置概览</button><strong>自动保存</strong><span>只保存已有文件路径的文档，避免覆盖未命名草稿。</span></div></div>
+          <label class="appearance-control appearance-range" for="auto-save-interval-input" data-settings-group="autosave" hidden>
+            <span class="appearance-label">自动保存循环间隔</span>
+            <span class="range-wrap">
+              <input id="auto-save-interval-input" type="range" min="3" max="10" step="1" value="5" />
+              <output id="auto-save-interval-value" for="auto-save-interval-input">5 秒</output>
+            </span>
+          </label>
+
+          <div class="appearance-control" data-settings-group="autosave" hidden>
+            <span id="auto-save-window-blur-label" class="appearance-label">窗口失焦自动保存</span>
             <button
               type="button"
-              id="adaptive-contrast-toggle"
+              id="auto-save-window-blur-toggle"
               class="appearance-switch"
               role="switch"
               aria-checked="true"
-              aria-labelledby="adaptive-contrast-label adaptive-contrast-value"
+              aria-labelledby="auto-save-window-blur-label auto-save-window-blur-value"
             >
               <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              <span id="adaptive-contrast-value" class="switch-value">开启</span>
+              <span id="auto-save-window-blur-value" class="switch-value">开启</span>
             </button>
           </div>
 
-          <div class="appearance-control">
+          <div class="appearance-control" data-settings-group="autosave" hidden>
+            <span id="auto-save-file-switch-label" class="appearance-label">切换文件自动保存</span>
+            <button
+              type="button"
+              id="auto-save-file-switch-toggle"
+              class="appearance-switch"
+              role="switch"
+              aria-checked="true"
+              aria-labelledby="auto-save-file-switch-label auto-save-file-switch-value"
+            >
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span id="auto-save-file-switch-value" class="switch-value">开启</span>
+            </button>
+          </div>
+
+          <div class="appearance-control" data-settings-group="appearance" hidden>
             <span id="panel-blur-label" class="appearance-label">面板背景模糊</span>
             <button
               type="button"
@@ -241,20 +320,61 @@
             </button>
           </div>
 
-          <label class="appearance-control" for="button-text-color-input">
+          <div class="appearance-control" data-settings-group="appearance" hidden>
+            <span id="topbar-blur-label" class="appearance-label">上方菜单栏背景模糊</span>
+            <button
+              type="button"
+              id="topbar-blur-toggle"
+              class="appearance-switch"
+              role="switch"
+              aria-checked="true"
+              aria-labelledby="topbar-blur-label topbar-blur-value"
+            >
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span id="topbar-blur-value" class="switch-value">开启</span>
+            </button>
+          </div>
+
+          <div class="appearance-control" data-settings-group="appearance" hidden>
+            <span id="statusbar-blur-label" class="appearance-label">下方状态栏背景模糊</span>
+            <button
+              type="button"
+              id="statusbar-blur-toggle"
+              class="appearance-switch"
+              role="switch"
+              aria-checked="true"
+              aria-labelledby="statusbar-blur-label statusbar-blur-value"
+            >
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span id="statusbar-blur-value" class="switch-value">开启</span>
+            </button>
+          </div>
+
+          <label class="appearance-control" for="button-text-color-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">按钮文字</span>
-            <input id="button-text-color-input" class="color-swatch" type="color" value="#20262e" />
+            <input id="button-text-color-input" class="color-swatch" type="color" value="#555555" />
           </label>
 
-          <label class="appearance-control" for="editor-color-input">
+          <label class="appearance-control" for="editor-color-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">编辑器字体</span>
-            <input id="editor-color-input" class="color-swatch" type="color" value="#1f1b15" />
+            <input id="editor-color-input" class="color-swatch" type="color" value="#1a1a1a" />
           </label>
 
-          <label class="appearance-control" for="preview-color-input">
+          <label class="appearance-control" for="preview-color-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">预览字体</span>
-            <input id="preview-color-input" class="color-swatch" type="color" value="#282016" />
+            <input id="preview-color-input" class="color-swatch" type="color" value="#1a1a1a" />
           </label>
+
+          <section class="settings-panel" data-settings-panel="system" hidden>
+            <div class="settings-panel-header"><div><button type="button" class="settings-back" data-settings-target="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>设置概览</button><strong>系统集成</strong><span>把 MarkFlow 接入 Windows 的文件关联、右键菜单和更新流程。</span></div></div>
+            <div class="settings-grid">
+              <div class="setting-row"><span><strong>Markdown 文件关联</strong><span>.md 文件可使用 MarkFlow 打开。</span></span><button type="button" class="settings-action primary" data-setting="open-with">启用</button></div>
+              <div class="setting-row"><span><strong>右键菜单新建 Markdown</strong><span>在文件夹空白处右键时显示“新建 Markdown 文件”。</span></span><button type="button" class="settings-action" data-setting="open-with">启用</button></div>
+              <div class="setting-row"><span><strong>默认打开方式</strong><span>设置 MarkFlow 为 .md 文件的默认程序。</span></span><span class="button-row"><button type="button" class="settings-action primary" data-setting="default-app">设为默认</button><button type="button" class="settings-action" data-setting="default-app">打开系统设置</button></span></div>
+              <div class="setting-row"><span><strong>应用更新</strong><span>主动获取最新版本并查看下载状态。</span></span><button type="button" id="check-updates-btn" class="settings-action"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>检查更新</button></div>
+            </div>
+          </section>
+          </div>
         </div>
 
         <footer class="appearance-footer">
@@ -262,7 +382,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             恢复默认
           </button>
-          <button class="primary" value="done">完成</button>
+          <span class="appearance-footer-actions">
+            <button value="cancel">取消</button>
+            <button class="primary" value="done">完成</button>
+          </span>
         </footer>
       </form>
     </dialog>
@@ -331,7 +454,20 @@
       </button>
     </div>
 
-    <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+    <div id="toast-region" class="toast-region" popover="manual" aria-label="消息提醒" aria-live="polite" aria-relevant="additions"></div>
+    <template id="toast-template">
+      <div class="toast">
+        <div class="toast-content">
+          <span class="toast-icon" aria-hidden="true">
+            <svg class="toast-icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5M12 8h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <svg class="toast-icon-success" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 2.7 2.7L16.5 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="toast-icon-error" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m9 9 6 6M15 9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+          <span class="toast-message"></span>
+        </div>
+        <span class="toast-progress" aria-hidden="true"><span class="toast-progress-bar"></span></span>
+      </div>
+    </template>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

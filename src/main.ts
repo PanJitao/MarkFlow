@@ -1,6 +1,7 @@
 // 主界面与交互：Markdown 源码编辑 + 实时预览 + 文件转换
 import './style.css'
 import hljs from 'highlight.js/lib/core'
+import bash from 'highlight.js/lib/languages/bash'
 import c from 'highlight.js/lib/languages/c'
 import cpp from 'highlight.js/lib/languages/cpp'
 import csharp from 'highlight.js/lib/languages/csharp'
@@ -14,6 +15,7 @@ import sql from 'highlight.js/lib/languages/sql'
 import { isTauri } from '@tauri-apps/api/core'
 import { Image } from '@tauri-apps/api/image'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
@@ -49,12 +51,20 @@ import {
   readDirectory,
   createWorkspaceFile,
   createWorkspaceFolder,
+  saveImageAsset,
+  copyImageAsset,
+  ensureWorkspaceImageDir,
+  renameWorkspaceEntry,
+  trashWorkspaceEntry,
+  workspaceRelativePath,
+  revealInFileManager,
   relativePath,
   resolveRelativePath,
   newWindow,
   type DirectoryEntry,
 } from './lib/io'
 
+hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('c', c)
 hljs.registerLanguage('cpp', cpp)
 hljs.registerLanguage('csharp', csharp)
@@ -88,6 +98,10 @@ const SAMPLE = `# 欢迎使用 MarkFlow
 
 const editor = document.querySelector<HTMLTextAreaElement>('#editor')!
 const editorLineNumbers = document.querySelector<HTMLElement>('#editor-line-numbers')!
+const editorLineMeasure = document.createElement('div')
+editorLineMeasure.className = 'editor-line-measure'
+editorLineMeasure.setAttribute('aria-hidden', 'true')
+document.body.append(editorLineMeasure)
 const preview = document.querySelector<HTMLElement>('#preview')!
 const statusEl = document.querySelector<HTMLElement>('#status')!
 const saveStrategyEl = document.querySelector<HTMLElement>('#save-strategy')!
@@ -147,6 +161,8 @@ const checkUpdatesBtn = document.querySelector<HTMLButtonElement>('#check-update
 const editorContextMenu = document.querySelector<HTMLElement>('#editor-context-menu')!
 const contextSubmenuTriggers = [...editorContextMenu.querySelectorAll<HTMLButtonElement>('[data-context-submenu]')]
 const fileTree = document.querySelector<HTMLElement>('#file-tree')!
+const fileTreeContextMenu = document.querySelector<HTMLElement>('#file-tree-context-menu')!
+const editorPanel = document.querySelector<HTMLElement>('.editor-panel')!
 const workspaceLabel = document.querySelector<HTMLElement>('#workspace-label')!
 const fileTreeToggleBtn = document.querySelector<HTMLButtonElement>('#file-tree-toggle-btn')!
 const windowTitleEl = document.querySelector<HTMLElement>('#window-title')!
@@ -157,6 +173,9 @@ const fileBtn = document.querySelector<HTMLButtonElement>('#file-btn')!
 const fileMenu = document.querySelector<HTMLElement>('#file-menu')!
 const recentFilesBtn = document.querySelector<HTMLButtonElement>('#recent-files-btn')!
 const recentFilesList = document.querySelector<HTMLElement>('#recent-files-list')!
+const standaloneImageDirEl = document.querySelector<HTMLElement>('#standalone-image-dir')!
+const chooseImageDirBtn = document.querySelector<HTMLButtonElement>('#choose-image-dir-btn')!
+const clearImageDirBtn = document.querySelector<HTMLButtonElement>('#clear-image-dir-btn')!
 const TOAST_DURATION_MS = 3000
 const TOAST_EXIT_MS = 220
 const MAX_VISIBLE_TOASTS = 5
@@ -175,6 +194,8 @@ let markdown = SAMPLE
 let currentFile: string | null = null
 let lastSavedMarkdown: string | null = null
 let workspaceRoot: string | null = null
+let pendingImageInsert: (() => Promise<void>) | null = null
+let fileTreeContextTarget: { path: string; kind: string; isRoot: boolean } | null = null
 const previewImageObjectUrls = new Set<string>()
 const expandedTreeDirectories = new Set<string>()
 let busy = false
@@ -184,14 +205,20 @@ let saveInFlight: Promise<void> | null = null
 let autoSaveErrorShown = false
 let writingPreviewTable = false
 let renderedEditorLineCount = 0
+let editorLineLayoutFrame: number | null = null
+let editorLineOffsets = [0]
 let previewAnchorFrame: number | null = null
+let pendingPreviewRenderLine: number | null = null
+let previewRenderSyncSuppressed = false
 let previewScrollAnchors: Array<{ line: number; top: number }> = []
 const undoStack: Array<{ value: string; start: number; end: number }> = []
 const MAX_UNDO_STEPS = 100
 
 const APP_WINDOW_TITLE = 'MarkFlow 文档转换工作台'
 const RECENT_FOLDERS_KEY = 'markflow:recentFolders'
+const STANDALONE_IMAGE_DIR_KEY = 'markflow:standaloneImageDir'
 const MAX_RECENT_FOLDERS = 10
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 function fileNameFromPath(path: string) {
   const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
@@ -337,7 +364,7 @@ function closeToastRegion() {
   try { region.hidePopover() } catch { /* 通知已经关闭 */ }
 }
 
-function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
+function showToast(message: string, type: 'success' | 'warning' | 'error' = 'warning') {
   openToastRegion()
   const fragment = toastTemplateEl.content.cloneNode(true) as DocumentFragment
   const toast = fragment.querySelector<HTMLElement>('.toast')!
@@ -354,13 +381,13 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'info')
   setTimeout(() => dismissToast(toast), TOAST_DURATION_MS)
 }
 
-function showZoomToast(message: string) {
+function showZoomToast(message: string, type: 'success' | 'warning' = 'success') {
   openToastRegion()
   let toast = zoomToast
   if (!toast || !toast.isConnected || toast.classList.contains('closing')) {
     const fragment = toastTemplateEl.content.cloneNode(true) as DocumentFragment
     toast = fragment.querySelector<HTMLElement>('.toast')!
-    toast.classList.add('info', 'zoom-toast')
+    toast.classList.add('zoom-toast')
     toastRegionEl.prepend(fragment)
     zoomToast = toast
     const overflow = [...toastRegionEl.querySelectorAll<HTMLElement>('.toast')].slice(MAX_VISIBLE_TOASTS)
@@ -368,6 +395,8 @@ function showZoomToast(message: string) {
     requestAnimationFrame(() => toast?.classList.add('show'))
   }
 
+  toast.classList.remove('success', 'warning')
+  toast.classList.add(type)
   const messageEl = toast.querySelector<HTMLElement>('.toast-message')
   const progressBar = toast.querySelector<HTMLElement>('.toast-progress-bar')
   if (messageEl) messageEl.textContent = message
@@ -419,7 +448,7 @@ async function checkForUpdate(manual = false): Promise<boolean> {
   if (!isTauri()) {
     if (manual) {
       setStatus('当前运行在浏览器预览环境，无法检查桌面更新')
-      showToast('桌面应用中才可以检查更新', 'info')
+      showToast('桌面应用中才可以检查更新', 'warning')
     }
     return false
   }
@@ -687,16 +716,64 @@ function markdownLineCount(value = editor.value) {
 
 function renderEditorLineNumbers(value = editor.value) {
   const lineCount = markdownLineCount(value)
-  if (lineCount === renderedEditorLineCount) return
-  const fragment = document.createDocumentFragment()
-  for (let line = 1; line <= lineCount; line += 1) {
-    const number = document.createElement('span')
-    number.className = 'editor-line-number'
-    number.textContent = String(line)
-    fragment.append(number)
+  if (lineCount !== renderedEditorLineCount) {
+    const fragment = document.createDocumentFragment()
+    for (let line = 1; line <= lineCount; line += 1) {
+      const number = document.createElement('span')
+      number.className = 'editor-line-number'
+      number.textContent = String(line)
+      fragment.append(number)
+    }
+    editorLineNumbers.replaceChildren(fragment)
+    renderedEditorLineCount = lineCount
   }
-  editorLineNumbers.replaceChildren(fragment)
-  renderedEditorLineCount = lineCount
+  scheduleEditorLineNumberLayout()
+}
+
+function updateEditorLineNumberLayout() {
+  if (editorLineLayoutFrame !== null) {
+    cancelAnimationFrame(editorLineLayoutFrame)
+    editorLineLayoutFrame = null
+  }
+  const style = getComputedStyle(editor)
+  const contentWidth = editor.clientWidth
+    - (Number.parseFloat(style.paddingLeft) || 0)
+    - (Number.parseFloat(style.paddingRight) || 0)
+  if (contentWidth <= 0) return
+
+  editorLineMeasure.style.width = `${contentWidth}px`
+  editorLineMeasure.style.font = style.font
+  editorLineMeasure.style.letterSpacing = style.letterSpacing
+  editorLineMeasure.style.lineHeight = style.lineHeight
+  editorLineMeasure.style.setProperty('tab-size', style.getPropertyValue('tab-size'))
+
+  const lines = editor.value.split('\n')
+  const fragment = document.createDocumentFragment()
+  lines.forEach((line) => {
+    const row = document.createElement('span')
+    row.className = 'editor-line-measure-row'
+    row.textContent = line || '\u200b'
+    fragment.append(row)
+  })
+  editorLineMeasure.replaceChildren(fragment)
+
+  const lineHeight = editorLineHeight()
+  const numbers = editorLineNumbers.children
+  const rows = editorLineMeasure.children
+  const offsets = [0]
+  for (let index = 0; index < lines.length; index += 1) {
+    const height = Math.max(lineHeight, rows[index]?.getBoundingClientRect().height || 0)
+    const number = numbers[index] as HTMLElement | undefined
+    if (number) number.style.height = `${height}px`
+    offsets.push(offsets[index] + height)
+  }
+  editorLineOffsets = offsets
+  syncEditorLineNumbers()
+}
+
+function scheduleEditorLineNumberLayout() {
+  if (editorLineLayoutFrame !== null) return
+  editorLineLayoutFrame = requestAnimationFrame(updateEditorLineNumberLayout)
 }
 
 function syncEditorLineNumbers() {
@@ -707,7 +784,7 @@ function setContentZoom(nextZoom: number) {
   const clamped = Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, nextZoom))
   if (clamped === contentZoom) {
     const atLimit = clamped === CONTENT_ZOOM_MIN || clamped === CONTENT_ZOOM_MAX
-    showZoomToast(atLimit ? `显示比例已达 ${clamped}%` : `内容显示 ${clamped}%`)
+    showZoomToast(atLimit ? `显示比例已达 ${clamped}%` : `内容显示 ${clamped}%`, atLimit ? 'warning' : 'success')
     return
   }
 
@@ -719,13 +796,15 @@ function setContentZoom(nextZoom: number) {
   zoomLevelEl.setAttribute('aria-label', `内容显示比例 ${contentZoom}%`)
 
   requestAnimationFrame(() => {
+    updateEditorLineNumberLayout()
     updatePreviewScrollAnchors()
-    editor.scrollTop = Math.max(0, (sourceLine - 1) * editorLineHeight())
+    editor.scrollTop = editorOffsetForSourceLine(sourceLine)
     preview.scrollTop = previewOffsetForSourceLine(sourceLine)
     syncEditorLineNumbers()
     requestAnimationFrame(() => { restoringZoomScroll = false })
   })
-  showZoomToast(`内容显示 ${contentZoom}%`)
+  const atLimit = contentZoom === CONTENT_ZOOM_MIN || contentZoom === CONTENT_ZOOM_MAX
+  showZoomToast(atLimit ? `显示比例已达 ${contentZoom}%` : `内容显示 ${contentZoom}%`, atLimit ? 'warning' : 'success')
 }
 
 function setMarkdown(value: string) {
@@ -766,7 +845,7 @@ function undoMarkdown() {
   markdown = previous.value
   editor.setSelectionRange(previous.start, previous.end)
   renderOnly()
-  showToast('已撤回', 'info')
+  showToast('已撤回', 'success')
   return true
 }
 
@@ -779,10 +858,12 @@ const CODE_LANGUAGE_ALIASES: Record<string, string> = {
   csharp: 'csharp',
   'c#': 'csharp',
   cs: 'csharp',
+  bash: 'bash',
   bat: 'dos',
   batch: 'dos',
   cmd: 'dos',
   dos: 'dos',
+  apex: 'java',
   java: 'java',
   javascript: 'javascript',
   js: 'javascript',
@@ -798,6 +879,7 @@ const CODE_LANGUAGE_ALIASES: Record<string, string> = {
   pwsh: 'powershell',
   py: 'python',
   python: 'python',
+  abap: 'sql',
   mysql: 'sql',
   plsql: 'sql',
   sql: 'sql',
@@ -923,8 +1005,22 @@ function setCodeCopyButtonState(button: HTMLButtonElement, copied = false) {
   button.setAttribute('aria-label', copied ? '已复制代码' : '复制代码')
 }
 
-function isRelativeImageSource(source: string) {
-  return source.length > 0 && !/^(?:[a-z]+:|\/|#)/i.test(source)
+function localPathFromFileUrl(source: string) {
+  try {
+    const url = new URL(source)
+    let path = decodeURIComponent(url.pathname)
+    if (/^\/[a-z]:\//i.test(path)) path = path.slice(1)
+    return path.replace(/\//g, '\\')
+  } catch {
+    return null
+  }
+}
+
+async function resolveLocalImagePath(source: string, markdownPath: string) {
+  if (!source || /^(?:data:|https?:|#)/i.test(source)) return null
+  if (/^file:/i.test(source)) return localPathFromFileUrl(source)
+  if (/^[a-z]:[\\/]/i.test(source) || source.startsWith('/')) return decodeURIComponent(source)
+  return await resolveRelativePath(markdownPath, decodeURIComponent(source))
 }
 
 function imageMimeType(source: string) {
@@ -937,9 +1033,9 @@ async function resolvePreviewImages() {
   const images = [...preview.querySelectorAll<HTMLImageElement>('img[src]')]
   for (const image of images) {
     const source = image.getAttribute('src') || ''
-    if (!isRelativeImageSource(source)) continue
     try {
-      const path = await resolveRelativePath(currentFile, decodeURIComponent(source))
+      const path = await resolveLocalImagePath(source, currentFile)
+      if (!path) continue
       const bytes = await readFileBytes(path)
       const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: imageMimeType(source) }))
       if (preview.contains(image)) {
@@ -955,6 +1051,8 @@ async function resolvePreviewImages() {
 }
 
 function renderPreview(value: string) {
+  pendingPreviewRenderLine = editorSourceLineAtScroll()
+  previewRenderSyncSuppressed = true
   previewImageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
   previewImageObjectUrls.clear()
   preview.innerHTML = renderMarkdown(value)
@@ -979,6 +1077,32 @@ function renderPreview(value: string) {
   })
   schedulePreviewScrollAnchors()
   void resolvePreviewImages()
+}
+
+function bytesToDataUrl(bytes: number[], mimeType: string) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error || new Error('图片编码失败'))
+    reader.readAsDataURL(new Blob([new Uint8Array(bytes)], { type: mimeType }))
+  })
+}
+
+async function buildPortableHtml(markdownSource: string, markdownPath: string) {
+  const html = buildHtmlDocument(markdownSource, fileNameFromPath(markdownPath).replace(/\.[^.]+$/, '') || 'MarkFlow 导出文档')
+  const documentNode = new DOMParser().parseFromString(html, 'text/html')
+  for (const image of [...documentNode.querySelectorAll<HTMLImageElement>('img[src]')]) {
+    const source = image.getAttribute('src') || ''
+    const path = await resolveLocalImagePath(source, markdownPath)
+    if (!path) continue
+    try {
+      const bytes = await readFileBytes(path)
+      image.setAttribute('src', await bytesToDataUrl(bytes, imageMimeType(source)))
+    } catch (error) {
+      throw new Error(`无法嵌入图片“${source}”：${errMsg(error)}`)
+    }
+  }
+  return `<!doctype html>\n${documentNode.documentElement.outerHTML}\n`
 }
 
 interface MarkdownTableSource {
@@ -1378,7 +1502,7 @@ async function copyEditorSelection() {
   const { text, start, end } = getSelection()
   const value = text.slice(start, end) || text
   if (!value) {
-    showToast('没有可复制的内容', 'info')
+    showToast('没有可复制的内容', 'warning')
     return
   }
   await navigator.clipboard.writeText(value)
@@ -1386,6 +1510,25 @@ async function copyEditorSelection() {
 }
 
 async function pasteIntoEditor() {
+  if (typeof navigator.clipboard.read === 'function') {
+    try {
+      const clipboardItems = await navigator.clipboard.read()
+      const images: File[] = []
+      for (const item of clipboardItems) {
+        const type = item.types.find((value) => value.startsWith('image/') && value !== 'image/svg+xml')
+        if (!type) continue
+        const blob = await item.getType(type)
+        const extension = type === 'image/jpeg' ? 'jpg' : type.split('/')[1] || 'png'
+        images.push(new File([blob], `image.${extension}`, { type }))
+      }
+      if (images.length) {
+        await importClipboardImages(images)
+        return
+      }
+    } catch {
+      // WebView 不允许程序化读取图片时，继续尝试原有文本剪贴板。
+    }
+  }
   const value = await navigator.clipboard.readText()
   if (!value) return
   insertBlock(value)
@@ -1412,14 +1555,14 @@ function formatJsonCodeBlock() {
   const openingFence = text.lastIndexOf('```', start)
   const openingLineEnd = openingFence === -1 ? -1 : text.indexOf('\n', openingFence)
   if (openingLineEnd === -1 || !isJsonLanguage(text.slice(openingFence + 3, openingLineEnd).trim().toLowerCase())) {
-    showToast('请将光标放在 JSON 代码块内', 'info')
+    showToast('请将光标放在 JSON 代码块内', 'warning')
     return
   }
 
   const contentStart = openingLineEnd + 1
   const closingFence = text.indexOf('\n```', contentStart)
   if (closingFence === -1 || start < contentStart || end > closingFence) {
-    showToast('请将光标放在 JSON 代码块内', 'info')
+    showToast('请将光标放在 JSON 代码块内', 'warning')
     return
   }
 
@@ -1514,13 +1657,7 @@ async function openMarkdownPath(path: string) {
   setMarkdown(text)
   lastSavedMarkdown = text
   updateDocumentSaveState()
-  if (!workspaceRoot) {
-    workspaceRoot = parentDirectoryFromPath(path)
-    rememberRecentFolder(workspaceRoot)
-    await renderWorkspaceTree()
-  } else {
-    renderWorkspaceTree()
-  }
+  await renderWorkspaceTree()
   setStatus(`已打开 ${path}`)
 }
 
@@ -1528,6 +1665,11 @@ async function openWorkspaceFolder() {
   const folder = await pickOpenFolder()
   if (!folder) return
   workspaceRoot = folder
+  try {
+    await ensureWorkspaceImageDir(folder)
+  } catch (error) {
+    showToast(`无法创建工作区 img 文件夹：${errMsg(error)}`, 'error')
+  }
   rememberRecentFolder(folder)
   expandedTreeDirectories.clear()
   expandedTreeDirectories.add(folder)
@@ -1592,49 +1734,172 @@ async function appendTreeEntries(container: DocumentFragment | HTMLElement, fold
   }
 }
 
-async function insertImageFromPath(path: string) {
+function getStandaloneImageDir() {
+  return localStorage.getItem(STANDALONE_IMAGE_DIR_KEY)?.trim() || ''
+}
+
+function updateStandaloneImageDirSetting() {
+  const directory = getStandaloneImageDir()
+  standaloneImageDirEl.textContent = directory || '尚未配置'
+  standaloneImageDirEl.title = directory || '尚未配置'
+  clearImageDirBtn.disabled = !directory
+}
+
+function fileUrlFromPath(path: string) {
+  const normalized = path.replace(/\\/g, '/')
+  const prefix = normalized.startsWith('/') ? 'file://' : 'file:///'
+  const readablePath = normalized
+    .replace(/%/g, '%25')
+    .replace(/#/g, '%23')
+    .replace(/\?/g, '%3F')
+  return `${prefix}${readablePath}`
+}
+
+async function imageReferenceSource(path: string) {
+  if (!currentFile) throw new Error('请先保存当前 Markdown 文件')
+  const relative = await relativePath(currentFile, path)
+  return /^[a-z]:[\\/]/i.test(relative) ? fileUrlFromPath(path) : relative.replace(/\\/g, '/')
+}
+
+async function insertImagePaths(paths: string[]) {
+  const references = []
+  for (const path of paths) {
+    const source = await imageReferenceSource(path)
+    references.push(`![${imageAltFromPath(path)}](${markdownImagePath(source)})`)
+  }
+  if (!references.length) return
+  insertBlock(references.join('\n\n'))
+}
+
+async function imageStorageDirectory(retry: () => Promise<void>) {
   if (!currentFile) {
-    showToast('请先保存当前 Markdown 文件，再插入相对路径图片', 'info')
+    showToast('请先保存当前 Markdown 文件', 'warning')
+    return null
+  }
+  if (workspaceRoot) return await ensureWorkspaceImageDir(workspaceRoot)
+  const configured = getStandaloneImageDir()
+  if (configured) return configured
+  pendingImageInsert = retry
+  showToast('请先配置无项目图片存储位置', 'warning')
+  openSettings('images')
+  return null
+}
+
+async function resolveAssetCollision(
+  save: (overwrite: boolean) => Promise<{ path: string; status: 'created' | 'reused' | 'conflict' }>,
+  fileName: string,
+) {
+  let result = await save(false)
+  if (result.status !== 'conflict') return result.path
+  if (!confirm(`图片“${fileName}”已经存在，但内容不同。是否覆盖原图？`)) return null
+  result = await save(true)
+  return result.path
+}
+
+async function importImagePaths(paths: string[]) {
+  const images = paths.filter(isImagePath)
+  if (!images.length) {
+    showToast('拖入的内容中没有支持的图片', 'warning')
     return
   }
-  const relative = await relativePath(currentFile, path)
-  insertBlock(`![${imageAltFromPath(path)}](${markdownImagePath(relative)})`)
-  showToast('已插入相对路径图片', 'success')
+  const retry = () => importImagePaths(images)
+  const directory = await imageStorageDirectory(retry)
+  if (!directory) return
+  const stored: string[] = []
+  for (const source of images) {
+    const fileName = fileNameFromPath(source)
+    const path = await resolveAssetCollision(
+      (overwrite) => copyImageAsset(source, directory, overwrite),
+      fileName,
+    )
+    if (path) stored.push(path)
+  }
+  await insertImagePaths(stored)
+  if (workspaceRoot) await renderWorkspaceTree()
+  if (stored.length) showToast(`已导入 ${stored.length} 张图片`, 'success')
+}
+
+function fallbackClipboardImageName(file: File) {
+  if (file.name && isImagePath(file.name)) return file.name
+  const extension = ({
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/bmp': 'bmp',
+  } as Record<string, string>)[file.type] || 'png'
+  const now = new Date()
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    '-',
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('')
+  return `image-${stamp}.${extension}`
+}
+
+async function importClipboardImages(files: File[]) {
+  const retry = () => importClipboardImages(files)
+  const directory = await imageStorageDirectory(retry)
+  if (!directory) return
+  const stored: string[] = []
+  for (const file of files) {
+    if (file.size > MAX_IMAGE_BYTES) throw new Error(`图片“${file.name || '未命名图片'}”不能超过 20 MiB`)
+    const fileName = fallbackClipboardImageName(file)
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const path = await resolveAssetCollision(
+      (overwrite) => saveImageAsset(directory, fileName, bytes, overwrite),
+      fileName,
+    )
+    if (path) stored.push(path)
+  }
+  await insertImagePaths(stored)
+  if (workspaceRoot) await renderWorkspaceTree()
+  if (stored.length) showToast(`已粘贴 ${stored.length} 张图片`, 'success')
+}
+
+async function insertImageFromPath(path: string) {
+  await insertImagePaths([path])
+  showToast('已引用本地图片', 'success')
 }
 
 async function insertImage() {
   const path = await pickFilePath([{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }])
-  if (!path) return
-  await insertImageFromPath(path)
+  if (path) await importImagePaths([path])
 }
 
-async function newWorkspaceFile() {
-  const parent = workspaceRoot || (currentFile ? parentDirectoryFromPath(currentFile) : null)
+async function insertImageReference() {
+  const path = await pickFilePath([{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }])
+  if (path) await insertImageFromPath(path)
+}
+
+async function newWorkspaceFile(parentOverride?: string) {
+  const parent = parentOverride || workspaceRoot || (currentFile ? parentDirectoryFromPath(currentFile) : null)
   if (!parent) {
-    showToast('请先打开文件夹', 'info')
+    showToast('请先打开文件夹', 'warning')
     return
   }
   const requested = prompt('请输入文件名', '新建文档.md')?.trim()
   if (!requested) return
   const name = /\.md$/i.test(requested) ? requested : `${requested}.md`
-  const path = await createWorkspaceFile(parent, name)
-  workspaceRoot ??= parent
-  expandedTreeDirectories.add(parent)
+  const path = await createWorkspaceFile(parent, name, workspaceRoot)
+  if (workspaceRoot) expandedTreeDirectories.add(parent)
   await renderWorkspaceTree()
   await openMarkdownPath(path)
 }
 
-async function newWorkspaceFolder() {
-  const parent = workspaceRoot || (currentFile ? parentDirectoryFromPath(currentFile) : null)
+async function newWorkspaceFolder(parentOverride?: string) {
+  const parent = parentOverride || workspaceRoot || (currentFile ? parentDirectoryFromPath(currentFile) : null)
   if (!parent) {
-    showToast('请先打开文件夹', 'info')
+    showToast('请先打开文件夹', 'warning')
     return
   }
   const name = prompt('请输入文件夹名', '新建文件夹')?.trim()
   if (!name) return
-  await createWorkspaceFolder(parent, name)
-  workspaceRoot ??= parent
-  expandedTreeDirectories.add(parent)
+  await createWorkspaceFolder(parent, name, workspaceRoot)
+  if (workspaceRoot) expandedTreeDirectories.add(parent)
   await renderWorkspaceTree()
   showToast('已新建文件夹', 'success')
 }
@@ -1647,10 +1912,8 @@ async function openMarkdown() {
   setMarkdown(picked.text)
   lastSavedMarkdown = picked.text
   updateDocumentSaveState()
-  workspaceRoot = parentDirectoryFromPath(picked.filePath)
+  workspaceRoot = null
   expandedTreeDirectories.clear()
-  expandedTreeDirectories.add(workspaceRoot)
-  rememberRecentFolder(workspaceRoot)
   await renderWorkspaceTree()
   setStatus(`已打开 ${picked.filePath}`)
 }
@@ -1665,13 +1928,7 @@ async function saveMarkdown() {
     setCurrentFile(target)
     if (markdown === content) lastSavedMarkdown = content
     updateDocumentSaveState()
-    if (!workspaceRoot) {
-      workspaceRoot = parentDirectoryFromPath(target)
-      rememberRecentFolder(workspaceRoot)
-      await renderWorkspaceTree()
-    } else {
-      void renderWorkspaceTree()
-    }
+    if (workspaceRoot) void renderWorkspaceTree()
     setStatus(`已保存到 ${target}`)
     showToast('已保存', 'success')
   } catch (err) {
@@ -1691,11 +1948,7 @@ async function saveMarkdownAs() {
     setCurrentFile(target)
     if (markdown === content) lastSavedMarkdown = content
     updateDocumentSaveState()
-    if (!workspaceRoot) {
-      workspaceRoot = parentDirectoryFromPath(target)
-      rememberRecentFolder(workspaceRoot)
-    }
-    await renderWorkspaceTree()
+    if (workspaceRoot) await renderWorkspaceTree()
     setStatus(`已另存为 ${target}`)
     showToast('已另存为', 'success')
   } catch (err) {
@@ -1748,7 +2001,7 @@ async function exportHtml() {
   if (!target) return
   setBusy(true, '正在导出 HTML…')
   try {
-    const html = buildHtmlDocument(picked.text, 'MarkFlow 导出文档')
+    const html = await buildPortableHtml(picked.text, picked.filePath)
     await writeTextFile(target, html)
     setMarkdown(picked.text)
     setCurrentFile(picked.filePath)
@@ -1761,6 +2014,51 @@ async function exportHtml() {
     showToast(`导出失败：${errMsg(err)}`, 'error')
   } finally {
     setBusy(false)
+  }
+}
+
+function waitForPreviewImages() {
+  const images = [...preview.querySelectorAll<HTMLImageElement>('img[src]')]
+  if (!images.length) return Promise.resolve()
+  return Promise.race([
+    Promise.all(images.map((image) => image.complete
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => image.addEventListener('load', () => resolve(), { once: true }))))
+      .then(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+  ])
+}
+
+async function exportPdf() {
+  if (typeof window.print !== 'function') {
+    showToast('当前环境不支持 PDF 打印', 'error')
+    return
+  }
+
+  setBusy(true, '正在准备 PDF…')
+  const previousTitle = document.title
+  const printTitle = fileNameFromPath(currentFile || '文档.md').replace(/\.[^.]+$/, '') || 'MarkFlow 文档'
+  const restorePrintState = () => {
+    document.title = previousTitle
+    setBusy(false)
+    window.removeEventListener('afterprint', restorePrintState)
+  }
+
+  try {
+    toggleFileMenu(false)
+    toggleConversionMenu(false)
+    toggleSettingsMenu(false)
+    closeEditorContextMenu()
+    closeFileTreeContextMenu()
+    if (appearanceDialog.open) appearanceDialog.close()
+    await waitForPreviewImages()
+    document.title = `${printTitle} - MarkFlow`
+    window.addEventListener('afterprint', restorePrintState, { once: true })
+    setStatus('已打开系统打印窗口，请选择“另存为 PDF”')
+    requestAnimationFrame(() => window.print())
+  } catch (error) {
+    restorePrintState()
+    showToast(`导出 PDF 失败：${errMsg(error)}`, 'error')
   }
 }
 
@@ -1828,6 +2126,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-file]').forEach((btn) => {
       : type === 'xlsx-to-md' ? () => convertOfficeToMarkdown('xlsx')
       : type === 'md-to-docx' ? exportDocx
       : type === 'export-html' ? exportHtml
+      : type === 'export-pdf' ? exportPdf
       : null
     if (action) void action().catch((error) => showToast(`操作失败：${errMsg(error)}`, 'error'))
   })
@@ -1848,6 +2147,122 @@ fileTree.addEventListener('click', (event) => {
   } else if (kind === 'image') {
     void insertImageFromPath(path).catch((error) => showToast(`插入图片失败：${errMsg(error)}`, 'error'))
   }
+})
+
+function normalizeComparablePath(path: string) {
+  return path.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+}
+
+function pathIsSameOrChild(path: string, parent: string) {
+  const value = normalizeComparablePath(path)
+  const root = normalizeComparablePath(parent)
+  return value === root || value.startsWith(`${root}/`)
+}
+
+function replacePathPrefix(path: string, previous: string, next: string) {
+  if (!pathIsSameOrChild(path, previous)) return path
+  return `${next}${path.slice(previous.length)}`
+}
+
+function closeFileTreeContextMenu() {
+  fileTreeContextMenu.hidden = true
+  fileTreeContextTarget = null
+}
+
+function openFileTreeContextMenu(event: MouseEvent) {
+  if (!workspaceRoot) return
+  const row = (event.target as Element | null)?.closest<HTMLButtonElement>('.file-tree-row')
+  const path = row?.dataset.path || workspaceRoot
+  const kind = row?.dataset.kind || 'directory'
+  const isRoot = normalizeComparablePath(path) === normalizeComparablePath(workspaceRoot)
+  fileTreeContextTarget = { path, kind, isRoot }
+  fileTreeContextMenu.querySelector<HTMLButtonElement>('[data-tree-action="rename"]')!.disabled = isRoot
+  fileTreeContextMenu.querySelector<HTMLButtonElement>('[data-tree-action="delete"]')!.disabled = isRoot
+  fileTreeContextMenu.hidden = false
+  const width = fileTreeContextMenu.offsetWidth
+  const height = fileTreeContextMenu.offsetHeight
+  fileTreeContextMenu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8))}px`
+  fileTreeContextMenu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))}px`
+  fileTreeContextMenu.querySelector<HTMLButtonElement>('[data-tree-action="new-file"]')?.focus({ preventScroll: true })
+}
+
+async function renameTreeEntry(target: { path: string; kind: string; isRoot: boolean }) {
+  if (!workspaceRoot || target.isRoot) return
+  const previousName = fileNameFromPath(target.path)
+  const nextName = prompt('请输入新名称', previousName)?.trim()
+  if (!nextName || nextName === previousName) return
+  if (target.kind === 'image' && !confirm('重命名图片不会自动修改 Markdown 中的引用，是否继续？')) return
+  const nextPath = await renameWorkspaceEntry(workspaceRoot, target.path, nextName)
+  if (currentFile && pathIsSameOrChild(currentFile, target.path)) {
+    setCurrentFile(replacePathPrefix(currentFile, target.path, nextPath))
+  }
+  const expanded = [...expandedTreeDirectories]
+  expandedTreeDirectories.clear()
+  expanded.forEach((path) => expandedTreeDirectories.add(replacePathPrefix(path, target.path, nextPath)))
+  await renderWorkspaceTree()
+  showToast('已重命名', 'success')
+}
+
+async function deleteTreeEntry(target: { path: string; kind: string; isRoot: boolean }) {
+  if (!workspaceRoot || target.isRoot) return
+  const warning = target.kind === 'directory'
+    ? `确定将文件夹“${fileNameFromPath(target.path)}”及其中内容移入系统回收站吗？`
+    : `确定将“${fileNameFromPath(target.path)}”移入系统回收站吗？`
+  if (!confirm(warning)) return
+  const affectsCurrentFile = Boolean(currentFile && pathIsSameOrChild(currentFile, target.path))
+  await trashWorkspaceEntry(workspaceRoot, target.path)
+  if (affectsCurrentFile) {
+    setCurrentFile(null)
+    lastSavedMarkdown = null
+    updateDocumentSaveState()
+    setStatus('当前文件已移入回收站，编辑内容保留为未保存文档')
+  }
+  ;[...expandedTreeDirectories].forEach((path) => {
+    if (pathIsSameOrChild(path, target.path)) expandedTreeDirectories.delete(path)
+  })
+  await renderWorkspaceTree()
+  showToast('已移入系统回收站', 'success')
+}
+
+fileTree.addEventListener('contextmenu', (event) => {
+  if (!workspaceRoot) return
+  event.preventDefault()
+  closeEditorContextMenu()
+  openFileTreeContextMenu(event)
+})
+
+fileTreeContextMenu.addEventListener('click', async (event) => {
+  const action = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-tree-action]')?.dataset.treeAction
+  const target = fileTreeContextTarget
+  if (!action || !target || !workspaceRoot) return
+  closeFileTreeContextMenu()
+  try {
+    const parent = target.kind === 'directory' ? target.path : parentDirectoryFromPath(target.path)
+    if (action === 'new-file') await newWorkspaceFile(parent)
+    else if (action === 'new-folder') await newWorkspaceFolder(parent)
+    else if (action === 'rename') await renameTreeEntry(target)
+    else if (action === 'delete') await deleteTreeEntry(target)
+    else if (action === 'reveal') await revealInFileManager(target.path)
+    else if (action === 'copy-path') {
+      await navigator.clipboard.writeText(target.path)
+      showToast('已复制完整路径', 'success')
+    } else if (action === 'copy-relative-path') {
+      await navigator.clipboard.writeText(await workspaceRelativePath(workspaceRoot, target.path))
+      showToast('已复制相对路径', 'success')
+    }
+  } catch (error) {
+    showToast(`文件操作失败：${errMsg(error)}`, 'error')
+  }
+})
+
+editor.addEventListener('paste', (event) => {
+  const files = [...event.clipboardData?.items || []]
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/') && item.type !== 'image/svg+xml')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
+  if (!files.length) return
+  event.preventDefault()
+  void importClipboardImages(files).catch((error) => showToast(`粘贴图片失败：${errMsg(error)}`, 'error'))
 })
 
 editor.addEventListener('beforeinput', (event) => {
@@ -1910,6 +2325,7 @@ editorContextMenu.addEventListener('click', async (event) => {
     else if (action === 'paste') await pasteIntoEditor()
     else if (action === 'format-json') formatJsonCodeBlock()
     else if (action === 'image') await insertImage()
+    else if (action === 'image-reference') await insertImageReference()
     else if (action === 'table' || action === 'quote') handleToolbar(action)
   } catch (err) {
     showToast(`操作失败：${errMsg(err)}`, 'error')
@@ -1919,12 +2335,18 @@ editorContextMenu.addEventListener('click', async (event) => {
 
 document.addEventListener('pointerdown', (event) => {
   if (!editorContextMenu.hidden && !editorContextMenu.contains(event.target as Node)) closeEditorContextMenu()
+  if (!fileTreeContextMenu.hidden && !fileTreeContextMenu.contains(event.target as Node)) closeFileTreeContextMenu()
 })
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !editorContextMenu.hidden) closeEditorContextMenu()
+  if (event.key === 'Escape' && !fileTreeContextMenu.hidden) closeFileTreeContextMenu()
 })
-window.addEventListener('resize', closeEditorContextMenu)
+window.addEventListener('resize', () => {
+  closeEditorContextMenu()
+  closeFileTreeContextMenu()
+})
 editor.addEventListener('scroll', closeEditorContextMenu)
+fileTree.addEventListener('scroll', closeFileTreeContextMenu)
 
 // ---------- 外部链接：拦截点击，用系统浏览器打开，绝不接管当前窗口 ----------
 
@@ -1936,7 +2358,7 @@ function handleExternalLink(e: Event, anchor: HTMLAnchorElement) {
   e.preventDefault()
   e.stopPropagation()
   openUrl(href)
-    .then(() => showToast('已在浏览器打开链接', 'info'))
+    .then(() => showToast('已在浏览器打开链接', 'success'))
     .catch((err) => showToast(`无法打开链接：${errMsg(err)}`, 'error'))
   return true
 }
@@ -2077,6 +2499,11 @@ async function openRecentFolder(path: string) {
   try {
     await readDirectory(path)
     workspaceRoot = path
+    try {
+      await ensureWorkspaceImageDir(path)
+    } catch (error) {
+      showToast(`无法创建工作区 img 文件夹：${errMsg(error)}`, 'error')
+    }
     expandedTreeDirectories.clear()
     expandedTreeDirectories.add(path)
     await renderWorkspaceTree()
@@ -2161,6 +2588,28 @@ document.querySelectorAll<HTMLButtonElement>('[data-settings-view]').forEach((bu
 })
 document.querySelectorAll<HTMLButtonElement>('[data-settings-target]').forEach((button) => {
   button.addEventListener('click', () => setSettingsView(button.dataset.settingsTarget || 'overview'))
+})
+chooseImageDirBtn.addEventListener('click', async () => {
+  const directory = await pickOpenFolder()
+  if (!directory) return
+  localStorage.setItem(STANDALONE_IMAGE_DIR_KEY, directory)
+  updateStandaloneImageDirSetting()
+  showToast('无项目图片存储位置已设置', 'success')
+  const pending = pendingImageInsert
+  pendingImageInsert = null
+  if (pending) {
+    appearanceDialog.close()
+    try {
+      await pending()
+    } catch (error) {
+      showToast(`插入图片失败：${errMsg(error)}`, 'error')
+    }
+  }
+})
+clearImageDirBtn.addEventListener('click', () => {
+  localStorage.removeItem(STANDALONE_IMAGE_DIR_KEY)
+  updateStandaloneImageDirSetting()
+  showToast('无项目图片存储位置已清除', 'success')
 })
 themeModeButtons.forEach((button) => {
   button.addEventListener('click', () => updateAppearance({ themeMode: (button.dataset.themeMode || 'system') as AppearanceSettings['themeMode'] }))
@@ -2254,7 +2703,7 @@ clearBackgroundBtn.addEventListener('click', async () => {
 
 chooseAppIconBtn.addEventListener('click', async () => {
   if (!isTauri()) {
-    showToast('自定义软件图标需要桌面版应用', 'info')
+    showToast('自定义软件图标需要桌面版应用', 'warning')
     return
   }
   const source = await pickFilePath([{ name: '软件图标', extensions: ['png', 'ico'] }])
@@ -2291,7 +2740,7 @@ clearAppIconBtn.addEventListener('click', async () => {
 
 chooseFileIconBtn.addEventListener('click', async () => {
   if (!isTauri()) {
-    showToast('自定义文件图标需要桌面版应用', 'info')
+    showToast('自定义文件图标需要桌面版应用', 'warning')
     return
   }
   const source = await pickFilePath([{ name: 'Windows 文件图标', extensions: ['ico'] }])
@@ -2306,7 +2755,7 @@ chooseFileIconBtn.addEventListener('click', async () => {
       showToast('Markdown 文件图标已应用并重新注册', 'success')
       setStatus('已应用自定义 Markdown 文件图标')
     } catch {
-      showToast('文件图标已保存，请重新注册 Markdown 文件关联', 'info')
+      showToast('文件图标已保存，请重新注册 Markdown 文件关联', 'warning')
       setStatus('文件图标已保存，等待重新注册文件关联')
     }
   } catch (err) {
@@ -2399,7 +2848,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-setting]').forEach((btn) => 
       } else if (action === 'default-app') {
         await registerMdHandler()
         await openDefaultAppsSettings()
-        showToast('已打开系统设置，请在 .md 中选择 MarkFlow', 'info')
+        showToast('已打开系统设置，请在 .md 中选择 MarkFlow', 'warning')
         setStatus('请在系统「默认应用」里把 .md 设为 MarkFlow')
       }
     } catch (err) {
@@ -2443,6 +2892,7 @@ preview.addEventListener('dblclick', (e) => {
 
 let scrollSyncSource: HTMLElement | null = null
 let scrollSyncFrame: number | null = null
+const pendingSyncedScrollPositions = new WeakMap<HTMLElement, number>()
 
 function editorLineHeight() {
   const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight)
@@ -2450,7 +2900,35 @@ function editorLineHeight() {
 }
 
 function editorSourceLineAtScroll() {
-  return Math.min(markdownLineCount(), editor.scrollTop / editorLineHeight() + 1)
+  const lineCount = markdownLineCount()
+  if (editorLineOffsets.length !== lineCount + 1) {
+    return Math.min(lineCount, editor.scrollTop / editorLineHeight() + 1)
+  }
+  let lower = 0
+  let upper = lineCount
+  while (lower < upper) {
+    const middle = Math.floor((lower + upper + 1) / 2)
+    if (editorLineOffsets[middle] <= editor.scrollTop) lower = middle
+    else upper = middle - 1
+  }
+  const index = Math.min(lineCount - 1, lower)
+  const start = editorLineOffsets[index]
+  const end = editorLineOffsets[index + 1]
+  const progress = end > start ? (editor.scrollTop - start) / (end - start) : 0
+  return Math.min(lineCount, index + 1 + Math.max(0, progress))
+}
+
+function editorOffsetForSourceLine(line: number) {
+  const lineCount = markdownLineCount()
+  if (editorLineOffsets.length !== lineCount + 1) {
+    return Math.max(0, (line - 1) * editorLineHeight())
+  }
+  const clamped = Math.min(lineCount, Math.max(1, line))
+  const index = Math.floor(clamped - 1)
+  const progress = clamped - 1 - index
+  const start = editorLineOffsets[index]
+  const end = editorLineOffsets[index + 1]
+  return start + (end - start) * progress
 }
 
 function updatePreviewScrollAnchors() {
@@ -2500,6 +2978,11 @@ function updatePreviewScrollAnchors() {
   if (!last || last.top < maxScroll) {
     previewScrollAnchors.push({ line: markdownLineCount() + 1, top: maxScroll })
   }
+  if (pendingPreviewRenderLine !== null) {
+    setSyncedScrollTop(preview, previewOffsetForSourceLine(pendingPreviewRenderLine))
+    pendingPreviewRenderLine = null
+  }
+  previewRenderSyncSuppressed = false
 }
 
 function schedulePreviewScrollAnchors() {
@@ -2533,16 +3016,30 @@ function sourceLineForPreviewOffset(top: number) {
   return interpolateAnchor(top, 'top', 'line')
 }
 
+function setSyncedScrollTop(target: HTMLElement, top: number) {
+  const maxScroll = Math.max(0, target.scrollHeight - target.clientHeight)
+  const nextTop = Math.min(maxScroll, Math.max(0, top))
+  if (Math.abs(target.scrollTop - nextTop) < 0.5) return
+  pendingSyncedScrollPositions.set(target, nextTop)
+  target.scrollTop = nextTop
+}
+
 function syncScroll(source: HTMLElement, target: HTMLElement) {
   if (restoringZoomScroll) return
+  const pendingTop = pendingSyncedScrollPositions.get(source)
+  if (pendingTop !== undefined) {
+    pendingSyncedScrollPositions.delete(source)
+    if (Math.abs(source.scrollTop - pendingTop) < 1) return
+  }
+  if (source === preview && previewRenderSyncSuppressed) return
   if (scrollSyncSource && scrollSyncSource !== source) return
   scrollSyncSource = source
   if (source === editor) {
     syncEditorLineNumbers()
-    target.scrollTop = previewOffsetForSourceLine(editorSourceLineAtScroll())
+    setSyncedScrollTop(target, previewOffsetForSourceLine(editorSourceLineAtScroll()))
   } else {
     const sourceLine = sourceLineForPreviewOffset(source.scrollTop)
-    target.scrollTop = Math.max(0, (sourceLine - 1) * editorLineHeight())
+    setSyncedScrollTop(target, editorOffsetForSourceLine(sourceLine))
     syncEditorLineNumbers()
   }
   if (scrollSyncFrame !== null) cancelAnimationFrame(scrollSyncFrame)
@@ -2575,8 +3072,13 @@ function showScrollbarsForActivity(target: EventTarget | null) {
 editor.addEventListener('scroll', () => syncScroll(editor, preview))
 preview.addEventListener('scroll', () => syncScroll(preview, editor))
 document.addEventListener('scroll', (event) => showScrollbarsForActivity(event.target), true)
-window.addEventListener('resize', schedulePreviewScrollAnchors)
-const paneResizeObserver = new ResizeObserver(schedulePreviewScrollAnchors)
+function schedulePaneLayout() {
+  scheduleEditorLineNumberLayout()
+  schedulePreviewScrollAnchors()
+}
+
+window.addEventListener('resize', schedulePaneLayout)
+const paneResizeObserver = new ResizeObserver(schedulePaneLayout)
 paneResizeObserver.observe(editor)
 paneResizeObserver.observe(preview)
 
@@ -2690,6 +3192,30 @@ fileTreeSplitter.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowRight') { e.preventDefault(); localStorage.setItem(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current + 20)}px`) }
 })
 
+async function setupImageDrop() {
+  if (!isTauri()) return
+  const scaleFactor = await getCurrentWindow().scaleFactor()
+  await getCurrentWebview().onDragDropEvent((event) => {
+    const payload = event.payload
+    if (payload.type === 'leave') {
+      editorPanel.classList.remove('image-drag-over')
+      return
+    }
+    const position = 'position' in payload ? payload.position : null
+    const rect = editorPanel.getBoundingClientRect()
+    const insideEditor = Boolean(position
+      && position.x / scaleFactor >= rect.left
+      && position.x / scaleFactor <= rect.right
+      && position.y / scaleFactor >= rect.top
+      && position.y / scaleFactor <= rect.bottom)
+    editorPanel.classList.toggle('image-drag-over', insideEditor)
+    if (payload.type !== 'drop') return
+    editorPanel.classList.remove('image-drag-over')
+    if (!insideEditor) return
+    void importImagePaths(payload.paths).catch((error) => showToast(`拖入图片失败：${errMsg(error)}`, 'error'))
+  })
+}
+
 // ---------- 启动初始化 ----------
 
 async function init() {
@@ -2714,11 +3240,13 @@ async function init() {
 }
 
 applyAppearance(appearanceSettings)
+updateStandaloneImageDirSetting()
 void restoreConfiguredIcons()
 const systemThemeMedia = window.matchMedia?.('(prefers-color-scheme: dark)')
 systemThemeMedia?.addEventListener('change', () => {
   if (appearanceSettings.themeMode === 'system') applyAppearance(appearanceSettings)
 })
 void restoreBackground()
+void setupImageDrop().catch((error) => console.warn('初始化图片拖拽失败', error))
 void init()
 setTimeout(() => void checkForUpdate(), 1200)

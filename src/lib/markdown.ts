@@ -8,6 +8,51 @@ const renderer = new MarkdownIt({
   breaks: true,
 })
 
+// markdown-it 默认拒绝 file:，但本地 Markdown 图片需要保留该协议，后续由桌面端读取为 Blob URL。
+const defaultValidateLink = renderer.validateLink
+renderer.validateLink = (url) => /^file:/i.test(url) || defaultValidateLink(url)
+
+// 仅放行图片的本地 file: 地址；其他链接仍遵循 DOMPurify 默认协议白名单。
+if (typeof DOMPurify.addHook === 'function') {
+  DOMPurify.addHook('uponSanitizeAttribute', (node, hookEvent) => {
+    if (node.nodeName === 'IMG'
+      && hookEvent.attrName === 'src'
+      && /^file:/i.test(hookEvent.attrValue)) {
+      hookEvent.forceKeepAttr = true
+    }
+  })
+}
+
+renderer.core.ruler.push('preserve-extra-blank-lines', (state) => {
+  const lines = state.src.split(/\r?\n/)
+  const tokens = []
+  let previousBlockEnd: number | null = null
+
+  state.tokens.forEach((token) => {
+    const isTopLevelBlockStart = token.level === 0 && token.map && token.nesting !== -1
+    if (isTopLevelBlockStart) {
+      let blankRun = 0
+      for (let line = previousBlockEnd ?? token.map[0]; line < token.map[0]; line += 1) {
+        if (!/^\s*$/.test(lines[line] || '')) {
+          blankRun = 0
+          continue
+        }
+        blankRun += 1
+        if (blankRun === 1) continue
+
+        const spacer = new state.Token('html_block', '', 0)
+        spacer.block = true
+        spacer.content = `<div class="markdown-blank-line" data-source-line="${line + 1}" aria-hidden="true"></div>\n`
+        tokens.push(spacer)
+      }
+      previousBlockEnd = token.map[1]
+    }
+    tokens.push(token)
+  })
+
+  state.tokens = tokens
+})
+
 renderer.core.ruler.push('source-line-attributes', (state) => {
   if (!state.env?.sourceMap) return
   state.tokens.forEach((token) => {
@@ -47,6 +92,7 @@ export function buildHtmlDocument(markdown: string, title: string): string {
     '    th { background: #f5f2ee; }',
     '    pre { background: #111827; color: #f9fafb; padding: 16px; overflow: auto; border-radius: 8px; }',
     "    code { font-family: 'Cascadia Code', Consolas, monospace; }",
+    '    .markdown-blank-line { height: 1.7em; }',
     '    blockquote { border-left: 4px solid #c96f2d; margin: 0; padding: 4px 16px; color: #6a5c49; background: #faf6ef; }',
     '    img { max-width: 100%; }',
     '  </style>',

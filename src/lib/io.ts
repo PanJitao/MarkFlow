@@ -4,6 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 
 export type FileFilter = { name: string; extensions: string[] }
 export type DirectoryEntry = { name: string; path: string; is_dir: boolean }
+export type ImageAssetResult = { path: string; status: 'created' | 'reused' | 'conflict' }
 
 /** 让用户选一个文件；可选拿到文本内容或二进制（用于 docx/xlsx） */
 export async function pickOpenFile(filters: FileFilter[], mode: 'text' | 'bytes') {
@@ -113,12 +114,40 @@ export function readDirectory(path: string): Promise<DirectoryEntry[]> {
   return invoke<DirectoryEntry[]>('read_directory', { path })
 }
 
-export function createWorkspaceFile(parent: string, name: string): Promise<string> {
-  return invoke<string>('create_workspace_file', { parent, name })
+export function createWorkspaceFile(parent: string, name: string, root: string | null = null): Promise<string> {
+  return invoke<string>('create_workspace_file', { parent, name, root })
 }
 
-export function createWorkspaceFolder(parent: string, name: string): Promise<string> {
-  return invoke<string>('create_workspace_folder', { parent, name })
+export function createWorkspaceFolder(parent: string, name: string, root: string | null = null): Promise<string> {
+  return invoke<string>('create_workspace_folder', { parent, name, root })
+}
+
+export function saveImageAsset(directory: string, fileName: string, bytes: Uint8Array, overwrite = false): Promise<ImageAssetResult> {
+  return invoke<ImageAssetResult>('save_image_asset', { directory, fileName, bytes: Array.from(bytes), overwrite })
+}
+
+export function copyImageAsset(source: string, directory: string, overwrite = false): Promise<ImageAssetResult> {
+  return invoke<ImageAssetResult>('copy_image_asset', { source, directory, overwrite })
+}
+
+export function ensureWorkspaceImageDir(root: string): Promise<string> {
+  return invoke<string>('ensure_workspace_image_dir', { root })
+}
+
+export function renameWorkspaceEntry(root: string, path: string, newName: string): Promise<string> {
+  return invoke<string>('rename_workspace_entry', { root, path, newName })
+}
+
+export function trashWorkspaceEntry(root: string, path: string): Promise<void> {
+  return invoke<void>('trash_workspace_entry', { root, path })
+}
+
+export function workspaceRelativePath(root: string, path: string): Promise<string> {
+  return invoke<string>('workspace_relative_path', { root, path })
+}
+
+export function revealInFileManager(path: string): Promise<void> {
+  return invoke<void>('reveal_in_file_manager', { path })
 }
 
 export function relativePath(fromFile: string, target: string): Promise<string> {

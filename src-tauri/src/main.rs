@@ -15,6 +15,9 @@ const PROG_ID: &str = "ExchangeMD.md";
 const APP_NAME: &str = "MarkFlow.exe";
 const MD_EXTS: &[&str] = &[".md", ".markdown", ".mdown"];
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -146,7 +149,14 @@ fn child_path(parent: &str, name: &str) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn create_workspace_file(parent: String, name: String) -> Result<String, String> {
+fn create_workspace_file(
+    parent: String,
+    name: String,
+    root: Option<String>,
+) -> Result<String, String> {
+    if let Some(root) = root {
+        checked_workspace_entry(&root, &parent, true)?;
+    }
     let path = child_path(&parent, &name)?;
     fs::OpenOptions::new()
         .write(true)
@@ -157,10 +167,192 @@ fn create_workspace_file(parent: String, name: String) -> Result<String, String>
 }
 
 #[tauri::command]
-fn create_workspace_folder(parent: String, name: String) -> Result<String, String> {
+fn create_workspace_folder(
+    parent: String,
+    name: String,
+    root: Option<String>,
+) -> Result<String, String> {
+    if let Some(root) = root {
+        checked_workspace_entry(&root, &parent, true)?;
+    }
     let path = child_path(&parent, &name)?;
     fs::create_dir(&path).map_err(|e| format!("新建文件夹失败：{e}"))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+#[derive(Serialize)]
+struct ImageAssetResult {
+    path: String,
+    status: String,
+}
+
+fn validate_image_name(name: &str) -> Result<(), String> {
+    let extension = Path::new(name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !IMAGE_EXTS.contains(&extension.as_str()) {
+        return Err("仅支持 PNG、JPG、JPEG、GIF、WebP、BMP 或 SVG 图片".into());
+    }
+    child_path(".", name).map(|_| ())
+}
+
+fn store_image_bytes(
+    directory: &Path,
+    file_name: &str,
+    bytes: &[u8],
+    overwrite: bool,
+) -> Result<ImageAssetResult, String> {
+    validate_image_name(file_name)?;
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        return Err("图片不能为空且不能超过 20 MiB".into());
+    }
+    fs::create_dir_all(directory).map_err(|e| format!("创建图片目录失败：{e}"))?;
+    let target = child_path(&directory.to_string_lossy(), file_name)?;
+    if target.exists() {
+        let existing = fs::read(&target).map_err(|e| format!("读取同名图片失败：{e}"))?;
+        if existing == bytes {
+            return Ok(ImageAssetResult {
+                path: target.to_string_lossy().to_string(),
+                status: "reused".into(),
+            });
+        }
+        if !overwrite {
+            return Ok(ImageAssetResult {
+                path: target.to_string_lossy().to_string(),
+                status: "conflict".into(),
+            });
+        }
+    }
+
+    let temp_name = format!(
+        ".markflow-image-{}-{}.tmp",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let temp = directory.join(temp_name);
+    fs::write(&temp, bytes).map_err(|e| format!("写入图片失败：{e}"))?;
+    if overwrite && target.exists() {
+        fs::remove_file(&target).map_err(|e| {
+            let _ = fs::remove_file(&temp);
+            format!("覆盖同名图片失败：{e}")
+        })?;
+    }
+    fs::rename(&temp, &target).map_err(|e| {
+        let _ = fs::remove_file(&temp);
+        format!("保存图片失败：{e}")
+    })?;
+    Ok(ImageAssetResult {
+        path: target.to_string_lossy().to_string(),
+        status: "created".into(),
+    })
+}
+
+#[tauri::command]
+fn save_image_asset(
+    directory: String,
+    file_name: String,
+    bytes: Vec<u8>,
+    overwrite: bool,
+) -> Result<ImageAssetResult, String> {
+    store_image_bytes(Path::new(&directory), &file_name, &bytes, overwrite)
+}
+
+#[tauri::command]
+fn copy_image_asset(
+    source: String,
+    directory: String,
+    overwrite: bool,
+) -> Result<ImageAssetResult, String> {
+    let source_path = Path::new(&source);
+    let file_name = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "无法读取图片文件名".to_string())?;
+    validate_image_name(file_name)?;
+    let bytes = fs::read(source_path).map_err(|e| format!("读取图片失败：{e}"))?;
+    store_image_bytes(Path::new(&directory), file_name, &bytes, overwrite)
+}
+
+#[tauri::command]
+fn ensure_workspace_image_dir(root: String) -> Result<String, String> {
+    let directory = Path::new(&root).join("img");
+    fs::create_dir_all(&directory).map_err(|e| format!("创建 img 文件夹失败：{e}"))?;
+    Ok(directory.to_string_lossy().to_string())
+}
+
+fn checked_workspace_entry(
+    root: &str,
+    target: &str,
+    allow_root: bool,
+) -> Result<(PathBuf, PathBuf), String> {
+    let root = fs::canonicalize(root).map_err(|e| format!("无法访问工作区：{e}"))?;
+    let target = fs::canonicalize(target).map_err(|e| format!("无法访问目标：{e}"))?;
+    if !target.starts_with(&root) || (!allow_root && target == root) {
+        return Err("只能操作工作区内部项目".into());
+    }
+    Ok((root, target))
+}
+
+#[tauri::command]
+fn rename_workspace_entry(root: String, path: String, new_name: String) -> Result<String, String> {
+    let (_, current) = checked_workspace_entry(&root, &path, false)?;
+    let parent = current
+        .parent()
+        .ok_or_else(|| "无法确定项目所在目录".to_string())?;
+    let target = child_path(&parent.to_string_lossy(), &new_name)?;
+    if target.exists() {
+        return Err("目标名称已经存在".into());
+    }
+    fs::rename(&current, &target).map_err(|e| format!("重命名失败：{e}"))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn trash_workspace_entry(root: String, path: String) -> Result<(), String> {
+    let (_, target) = checked_workspace_entry(&root, &path, false)?;
+    trash::delete(&target).map_err(|e| format!("移入系统回收站失败：{e}"))
+}
+
+#[tauri::command]
+fn workspace_relative_path(root: String, path: String) -> Result<String, String> {
+    let (root, target) = checked_workspace_entry(&root, &path, true)?;
+    let relative =
+        pathdiff::diff_paths(target, root).ok_or_else(|| "无法生成相对路径".to_string())?;
+    let value = relative.to_string_lossy().replace('\\', "/");
+    Ok(if value.is_empty() { ".".into() } else { value })
+}
+
+#[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let target = Path::new(&path);
+    if !target.exists() {
+        return Err("目标不存在".into());
+    }
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("explorer.exe");
+        command.creation_flags(CREATE_NO_WINDOW);
+        if target.is_dir() {
+            command.arg(target);
+        } else {
+            command.arg("/select,").arg(target);
+        }
+        return command
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开资源管理器失败：{e}"));
+    }
+    #[cfg(not(windows))]
+    {
+        let reveal = if target.is_dir() {
+            target
+        } else {
+            target.parent().unwrap_or(target)
+        };
+        shell_open(&reveal.to_string_lossy())
+    }
 }
 
 /// 返回 target 相对于 Markdown 文件所在目录的路径，用于图片引用。
@@ -451,6 +643,66 @@ fn reg_add(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_directory(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "markflow-{name}-{}-{}",
+            std::process::id(),
+            TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn image_assets_keep_names_and_detect_conflicts() {
+        let directory = test_directory("images");
+        let original = b"original-image";
+        let changed = b"changed-image";
+
+        let created = store_image_bytes(&directory, "产品图.png", original, false).unwrap();
+        assert_eq!(created.status, "created");
+        assert_eq!(Path::new(&created.path).file_name().unwrap(), "产品图.png");
+
+        let reused = store_image_bytes(&directory, "产品图.png", original, false).unwrap();
+        assert_eq!(reused.status, "reused");
+
+        let conflict = store_image_bytes(&directory, "产品图.png", changed, false).unwrap();
+        assert_eq!(conflict.status, "conflict");
+        assert_eq!(fs::read(directory.join("产品图.png")).unwrap(), original);
+
+        let overwritten = store_image_bytes(&directory, "产品图.png", changed, true).unwrap();
+        assert_eq!(overwritten.status, "created");
+        assert_eq!(fs::read(directory.join("产品图.png")).unwrap(), changed);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn workspace_rename_stays_inside_root() {
+        let root = test_directory("rename");
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("before.md");
+        fs::write(&source, "content").unwrap();
+
+        let renamed = rename_workspace_entry(
+            root.to_string_lossy().to_string(),
+            source.to_string_lossy().to_string(),
+            "after.md".into(),
+        )
+        .unwrap();
+        assert_eq!(Path::new(&renamed).file_name().unwrap(), "after.md");
+        assert!(root.join("after.md").exists());
+        assert!(rename_workspace_entry(
+            root.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+            "outside".into(),
+        )
+        .is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -464,6 +716,13 @@ fn main() {
             read_directory,
             create_workspace_file,
             create_workspace_folder,
+            save_image_asset,
+            copy_image_asset,
+            ensure_workspace_image_dir,
+            rename_workspace_entry,
+            trash_workspace_entry,
+            workspace_relative_path,
+            reveal_in_file_manager,
             relative_path,
             resolve_relative_path,
             new_window,

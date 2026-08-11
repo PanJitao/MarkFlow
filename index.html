@@ -73,6 +73,7 @@
               <button data-file="xlsx-to-md" data-convert role="menuitem" title="把 Excel 表格转成 Markdown">Excel 转 MD</button>
               <button data-file="md-to-docx" data-convert role="menuitem" title="选择 md 文件并导出为 Word">MD 转 Word</button>
               <button data-file="export-html" data-convert role="menuitem" title="选择 md 文件并导出为 HTML">导出 HTML</button>
+              <button data-file="export-pdf" data-convert role="menuitem" title="把当前预览内容打印为 PDF">导出 PDF</button>
             </div>
           </div>
         </nav>
@@ -130,7 +131,7 @@
           </div>
           <div class="editor-surface">
             <div id="editor-line-numbers" class="editor-line-numbers" aria-hidden="true"></div>
-            <textarea id="editor" wrap="off" spellcheck="false" placeholder="在这里输入 Markdown 内容…" aria-label="Markdown 编辑器"></textarea>
+            <textarea id="editor" wrap="soft" spellcheck="false" placeholder="在这里输入 Markdown 内容…" aria-label="Markdown 编辑器"></textarea>
           </div>
         </article>
 
@@ -164,7 +165,7 @@
         <header class="appearance-header settings-dialog-header">
           <div>
             <h2 id="appearance-title">设置</h2>
-            <p>自动保存、主题与系统集成分开管理，修改会即时反映到工作区。</p>
+            <p>自动保存、图片、主题与系统集成分开管理，修改会即时生效。</p>
           </div>
           <button class="appearance-close icon-btn" value="close" aria-label="关闭设置" title="关闭设置">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -175,6 +176,7 @@
           <nav class="settings-nav" aria-label="设置分类">
             <button type="button" class="settings-nav-item" data-settings-view="overview" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>概览</button>
             <button type="button" class="settings-nav-item" data-settings-view="autosave" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 4v5h8V4M8 15h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>自动保存</button>
+            <button type="button" class="settings-nav-item" data-settings-view="images" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8" cy="9" r="1.4" fill="currentColor"/><path d="m4 18 5-5 3 3 3-3 5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>图片管理</button>
             <button type="button" class="settings-nav-item" data-settings-view="appearance" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>主题与外观</button>
             <button type="button" class="settings-nav-item" data-settings-view="system" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 21h8M12 17v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>系统集成</button>
           </nav>
@@ -183,6 +185,7 @@
           <section class="settings-panel" data-settings-panel="overview">
             <div class="settings-panel-header"><div><strong>设置概览</strong><span>把高频行为和视觉偏好拆成独立入口，避免一屏堆叠。</span></div></div>
             <button type="button" class="settings-link" data-settings-target="autosave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 4v5h8V4M8 15h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span><strong>自动保存</strong><span>循环 5 秒 · 失焦开启 · 切换文件开启</span></span><svg class="settings-link-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button type="button" class="settings-link" data-settings-target="images"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8" cy="9" r="1.4" fill="currentColor"/><path d="m4 18 5-5 3 3 3-3 5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span><strong>图片管理</strong><span>无项目存储位置、粘贴、拖拽与导入</span></span><svg class="settings-link-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button type="button" class="settings-link" data-settings-target="appearance"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span><strong>主题与外观</strong><span>背景、透明度、图标、面板模糊与文字颜色</span></span><svg class="settings-link-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button type="button" class="settings-link" data-settings-target="system"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 21h8M12 17v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span><strong>系统集成</strong><span>文件关联、右键新建、默认打开方式与检查更新</span></span><svg class="settings-link-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </section>
@@ -289,6 +292,15 @@
               <span id="auto-save-window-blur-value" class="switch-value">开启</span>
             </button>
           </div>
+
+          <section class="settings-panel" data-settings-panel="images" hidden>
+            <div class="settings-panel-header"><div><button type="button" class="settings-back" data-settings-target="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>设置概览</button><strong>图片管理</strong><span>工作区图片保存到根目录 img；单文件模式使用下方目录。</span></div></div>
+            <div class="setting-row image-storage-setting">
+              <span><strong>无项目图片存储位置</strong><span id="standalone-image-dir" title="尚未配置">尚未配置</span></span>
+              <span class="button-row"><button type="button" id="choose-image-dir-btn" class="settings-action primary">选择目录</button><button type="button" id="clear-image-dir-btn" class="settings-action" disabled>清除</button></span>
+            </div>
+            <p class="settings-note">未打开文件夹时，首次粘贴或导入图片会要求先配置该位置。直接引用本地图片不复制文件。</p>
+          </section>
 
           <div class="appearance-control" data-settings-group="autosave" hidden>
             <span id="auto-save-file-switch-label" class="appearance-label">切换文件自动保存</span>
@@ -426,7 +438,11 @@
       </button>
       <button type="button" data-context-action="image" role="menuitem">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><path d="m4 18 5-5 3 3 3-3 5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-        插入图片
+        导入图片
+      </button>
+      <button type="button" data-context-action="image-reference" role="menuitem">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        引用本地图片
       </button>
       <div class="editor-context-submenu-wrap">
         <button type="button" class="context-menu-trigger" data-context-submenu="code" aria-haspopup="menu" aria-expanded="false" role="menuitem">
@@ -454,12 +470,25 @@
       </button>
     </div>
 
+    <div id="file-tree-context-menu" class="editor-context-menu file-tree-context-menu" role="menu" aria-label="文件树右键菜单" hidden>
+      <button type="button" data-tree-action="new-file" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h9l5 5v13H5zM14 3v6h6M12 12v6M9 15h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>新建文件</button>
+      <button type="button" data-tree-action="new-folder" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3zM12 11v5M9.5 13.5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>新建文件夹</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button type="button" data-tree-action="rename" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20zM13.5 7l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>重命名</button>
+      <button type="button" data-tree-action="reveal" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3zM12 12h6M15 9l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>在资源管理器中打开</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button type="button" data-tree-action="copy-path" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 16H4V4h12v1" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>复制路径</button>
+      <button type="button" data-tree-action="copy-relative-path" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h6M13 17h6M8 7v10h5M10 14l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>复制相对路径</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button type="button" class="danger-menu-item" data-tree-action="delete" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>删除</button>
+    </div>
+
     <div id="toast-region" class="toast-region" popover="manual" aria-label="消息提醒" aria-live="polite" aria-relevant="additions"></div>
     <template id="toast-template">
       <div class="toast">
         <div class="toast-content">
           <span class="toast-icon" aria-hidden="true">
-            <svg class="toast-icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5M12 8h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <svg class="toast-icon-warning" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9v5M12 17h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             <svg class="toast-icon-success" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 2.7 2.7L16.5 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <svg class="toast-icon-error" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m9 9 6 6M15 9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </span>

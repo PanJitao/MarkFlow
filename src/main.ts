@@ -735,6 +735,8 @@ function updateEditorLineNumberLayout() {
     cancelAnimationFrame(editorLineLayoutFrame)
     editorLineLayoutFrame = null
   }
+  markProgrammaticScroll(editor)
+  markProgrammaticScroll(editorLineNumbers)
   const style = getComputedStyle(editor)
   const contentWidth = editor.clientWidth
     - (Number.parseFloat(style.paddingLeft) || 0)
@@ -798,8 +800,8 @@ function setContentZoom(nextZoom: number) {
   requestAnimationFrame(() => {
     updateEditorLineNumberLayout()
     updatePreviewScrollAnchors()
-    editor.scrollTop = editorOffsetForSourceLine(sourceLine)
-    preview.scrollTop = previewOffsetForSourceLine(sourceLine)
+    setSyncedScrollTop(editor, editorOffsetForSourceLine(sourceLine))
+    setSyncedScrollTop(preview, previewOffsetForSourceLine(sourceLine))
     syncEditorLineNumbers()
     requestAnimationFrame(() => { restoringZoomScroll = false })
   })
@@ -1053,6 +1055,7 @@ async function resolvePreviewImages() {
 function renderPreview(value: string) {
   pendingPreviewRenderLine = editorSourceLineAtScroll()
   previewRenderSyncSuppressed = true
+  markProgrammaticScroll(preview)
   previewImageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
   previewImageObjectUrls.clear()
   preview.innerHTML = renderMarkdown(value)
@@ -2890,9 +2893,10 @@ preview.addEventListener('dblclick', (e) => {
   selection.addRange(range)
 })
 
-let scrollSyncSource: HTMLElement | null = null
-let scrollSyncFrame: number | null = null
-const pendingSyncedScrollPositions = new WeakMap<HTMLElement, number>()
+const userScrollIntentAt = new WeakMap<HTMLElement, number>()
+const programmaticScrollAt = new WeakMap<HTMLElement, number>()
+const scrollbarDragSurfaces = new Map<number, HTMLElement>()
+const USER_SCROLL_INTENT_MS = 1000
 
 function editorLineHeight() {
   const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight)
@@ -2936,6 +2940,8 @@ function updatePreviewScrollAnchors() {
     cancelAnimationFrame(previewAnchorFrame)
     previewAnchorFrame = null
   }
+  markProgrammaticScroll(editor)
+  markProgrammaticScroll(preview)
   const editorPaddingTop = Number.parseFloat(getComputedStyle(editor).paddingTop) || 0
   const editorScrollTail = Math.max(0, editor.clientHeight - editorPaddingTop * 2 - editorLineHeight())
   document.documentElement.style.setProperty('--editor-scroll-sync-tail', `${editorScrollTail}px`)
@@ -3020,20 +3026,13 @@ function setSyncedScrollTop(target: HTMLElement, top: number) {
   const maxScroll = Math.max(0, target.scrollHeight - target.clientHeight)
   const nextTop = Math.min(maxScroll, Math.max(0, top))
   if (Math.abs(target.scrollTop - nextTop) < 0.5) return
-  pendingSyncedScrollPositions.set(target, nextTop)
+  markProgrammaticScroll(target)
   target.scrollTop = nextTop
 }
 
 function syncScroll(source: HTMLElement, target: HTMLElement) {
   if (restoringZoomScroll) return
-  const pendingTop = pendingSyncedScrollPositions.get(source)
-  if (pendingTop !== undefined) {
-    pendingSyncedScrollPositions.delete(source)
-    if (Math.abs(source.scrollTop - pendingTop) < 1) return
-  }
   if (source === preview && previewRenderSyncSuppressed) return
-  if (scrollSyncSource && scrollSyncSource !== source) return
-  scrollSyncSource = source
   if (source === editor) {
     syncEditorLineNumbers()
     setSyncedScrollTop(target, previewOffsetForSourceLine(editorSourceLineAtScroll()))
@@ -3042,11 +3041,6 @@ function syncScroll(source: HTMLElement, target: HTMLElement) {
     setSyncedScrollTop(target, editorOffsetForSourceLine(sourceLine))
     syncEditorLineNumbers()
   }
-  if (scrollSyncFrame !== null) cancelAnimationFrame(scrollSyncFrame)
-  scrollSyncFrame = requestAnimationFrame(() => {
-    scrollSyncSource = null
-    scrollSyncFrame = null
-  })
 }
 
 const scrollActivityTimers = new WeakMap<HTMLElement, number>()
@@ -3069,9 +3063,65 @@ function showScrollbarsForActivity(target: EventTarget | null) {
   scrollActivityTimers.set(target, timer)
 }
 
-editor.addEventListener('scroll', () => syncScroll(editor, preview))
-preview.addEventListener('scroll', () => syncScroll(preview, editor))
-document.addEventListener('scroll', (event) => showScrollbarsForActivity(event.target), true)
+function scrollSurfaceForTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null
+  return target.closest<HTMLElement>('#editor, #preview .code-scroll, #preview pre, #preview, .file-tree, .settings-content, .appearance-body')
+}
+
+function markProgrammaticScroll(target: HTMLElement) {
+  programmaticScrollAt.set(target, performance.now())
+}
+
+function markUserScrollIntent(target: EventTarget | null) {
+  const surface = scrollSurfaceForTarget(target)
+  if (!surface) return
+  userScrollIntentAt.set(surface, performance.now())
+  showScrollbarsForActivity(surface)
+}
+
+function isUserDrivenScroll(target: HTMLElement) {
+  const userAt = userScrollIntentAt.get(target) || 0
+  const programmaticAt = programmaticScrollAt.get(target) || 0
+  return [...scrollbarDragSurfaces.values()].includes(target)
+    || (userAt > programmaticAt && performance.now() - userAt <= USER_SCROLL_INTENT_MS)
+}
+
+function handleScrollEvent(event: Event) {
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+  if (target === editor) syncEditorLineNumbers()
+  if (!isUserDrivenScroll(target)) return
+  userScrollIntentAt.set(target, performance.now())
+  showScrollbarsForActivity(target)
+  if (target === editor) syncScroll(editor, preview)
+  else if (target === preview) syncScroll(preview, editor)
+}
+
+document.addEventListener('wheel', (event) => markUserScrollIntent(event.target), { capture: true, passive: true })
+document.addEventListener('touchmove', (event) => markUserScrollIntent(event.target), { capture: true, passive: true })
+document.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return
+  const surface = scrollSurfaceForTarget(event.target)
+  if (!surface) return
+  const rect = surface.getBoundingClientRect()
+  const onVerticalScrollbar = surface.scrollHeight > surface.clientHeight && event.clientX >= rect.right - 14
+  const onHorizontalScrollbar = surface.scrollWidth > surface.clientWidth && event.clientY >= rect.bottom - 14
+  if (onVerticalScrollbar || onHorizontalScrollbar) {
+    scrollbarDragSurfaces.set(event.pointerId, surface)
+    markUserScrollIntent(surface)
+  }
+}, true)
+document.addEventListener('pointermove', (event) => {
+  const surface = scrollbarDragSurfaces.get(event.pointerId)
+  if (surface) markUserScrollIntent(surface)
+}, true)
+document.addEventListener('pointerup', (event) => scrollbarDragSurfaces.delete(event.pointerId), true)
+document.addEventListener('pointercancel', (event) => scrollbarDragSurfaces.delete(event.pointerId), true)
+document.addEventListener('keydown', (event) => {
+  if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) return
+  markUserScrollIntent(document.activeElement)
+}, true)
+document.addEventListener('scroll', handleScrollEvent, true)
 function schedulePaneLayout() {
   scheduleEditorLineNumberLayout()
   schedulePreviewScrollAnchors()

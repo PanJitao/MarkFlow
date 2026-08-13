@@ -19,7 +19,13 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
-import { docxToMarkdown, xlsxToMarkdown, markdownToDocxBlob } from './lib/convert'
+import {
+  docxToMarkdownWithImages,
+  externalizeMarkdownDataImages,
+  xlsxToMarkdown,
+  markdownToDocxBlob,
+  type MarkdownImageAsset,
+} from './lib/convert'
 import {
   clearBackgroundAsset,
   DEFAULT_APPEARANCE,
@@ -36,8 +42,10 @@ import {
   pickOpenFolder,
   pickSavePath,
   writeTextFile,
+  writeExistingTextFile,
   writeBytesFile,
   readTextFile,
+  pathExists,
   readFileBytes,
   swapExtension,
   getLaunchFile,
@@ -197,6 +205,7 @@ let workspaceRoot: string | null = null
 let pendingImageInsert: (() => Promise<void>) | null = null
 let fileTreeContextTarget: { path: string; kind: string; isRoot: boolean } | null = null
 const previewImageObjectUrls = new Set<string>()
+let previewImageObserver: IntersectionObserver | null = null
 const expandedTreeDirectories = new Set<string>()
 let busy = false
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null
@@ -219,6 +228,9 @@ const RECENT_FOLDERS_KEY = 'markflow:recentFolders'
 const STANDALONE_IMAGE_DIR_KEY = 'markflow:standaloneImageDir'
 const MAX_RECENT_FOLDERS = 10
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+const LARGE_DOCUMENT_CHARS = 1_000_000
+const LARGE_PREVIEW_DELAY_MS = 350
+let largePreviewTimer: ReturnType<typeof setTimeout> | null = null
 
 function fileNameFromPath(path: string) {
   const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
@@ -255,15 +267,35 @@ function setCurrentFile(path: string | null) {
   updateDocumentSaveState()
 }
 
+async function filePathStillExists(path: string) {
+  if (!isTauri()) return true
+  try {
+    return await pathExists(path)
+  } catch {
+    return false
+  }
+}
+
 const STATE_KEY = 'exchangemd:lastState'
 let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearPersistedSession() {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  localStorage.removeItem(STATE_KEY)
+}
 
 /** 防抖保存当前编辑器内容 + 文件路径，下次打开可恢复 */
 function schedulePersist() {
   if (persistTimer) clearTimeout(persistTimer)
   persistTimer = setTimeout(() => {
     try {
-      localStorage.setItem(STATE_KEY, JSON.stringify({ markdown: editor.value, currentFile }))
+      const state = currentFile && editor.value.length > LARGE_DOCUMENT_CHARS
+        ? { currentFile }
+        : { markdown: editor.value, currentFile }
+      localStorage.setItem(STATE_KEY, JSON.stringify(state))
     } catch {
       // 容量超限或隐私模式，忽略
     }
@@ -271,12 +303,33 @@ function schedulePersist() {
 }
 
 /** 恢复上次会话；没有则用欢迎示例 */
-function restoreSession() {
+async function restoreSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(STATE_KEY) || 'null')
     if (saved && typeof saved.markdown === 'string' && saved.markdown.trim()) {
       setMarkdown(saved.markdown)
-      setCurrentFile(typeof saved.currentFile === 'string' ? saved.currentFile : null)
+      const savedPath = typeof saved.currentFile === 'string' ? saved.currentFile : null
+      const fileStillExists = savedPath ? await filePathStillExists(savedPath) : false
+      if (savedPath && !fileStillExists) {
+        setCurrentFile(null)
+        setMarkdown(SAMPLE)
+        clearPersistedSession()
+        setStatus('上次文件已不存在，已恢复为未保存草稿')
+      } else {
+        setCurrentFile(savedPath)
+      }
+      return true
+    }
+    if (saved && typeof saved.currentFile === 'string' && saved.currentFile) {
+      if (!await filePathStillExists(saved.currentFile)) {
+        setCurrentFile(null)
+        setMarkdown(SAMPLE)
+        clearPersistedSession()
+        setStatus('上次文件已不存在，已清理恢复记录')
+        return false
+      }
+      const text = await readTextFile(saved.currentFile)
+      await applyOpenedMarkdown(saved.currentFile, text)
       return true
     }
   } catch {
@@ -327,7 +380,9 @@ function updateAutoSaveStrategyStatus(settings = appearanceSettings) {
 
 /** 更新字数统计（汉字按字、英文按词综合估算） */
 function updateCount() {
-  const text = editor.value.trim()
+  const text = editor.value.length > LARGE_DOCUMENT_CHARS
+    ? editor.value.replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, '').trim()
+    : editor.value.trim()
   if (!text) { wordCountEl.textContent = '0 字'; return }
   // 中日韩字符逐个计数，其余按空白分词
   const cjk = (text.match(/[一-鿿぀-ヿ가-힯]/g) || []).length
@@ -738,6 +793,15 @@ function updateEditorLineNumberLayout() {
   markProgrammaticScroll(editor)
   markProgrammaticScroll(editorLineNumbers)
   const style = getComputedStyle(editor)
+  if (editor.value.length > LARGE_DOCUMENT_CHARS) {
+    const lineHeight = editorLineHeight()
+    const lineCount = markdownLineCount()
+    editorLineOffsets = Array.from({ length: lineCount + 1 }, (_, index) => index * lineHeight)
+    ;[...editorLineNumbers.children].forEach((number) => (number as HTMLElement).style.height = `${lineHeight}px`)
+    editorLineMeasure.replaceChildren()
+    syncEditorLineNumbers()
+    return
+  }
   const contentWidth = editor.clientWidth
     - (Number.parseFloat(style.paddingLeft) || 0)
     - (Number.parseFloat(style.paddingRight) || 0)
@@ -822,15 +886,24 @@ function setMarkdown(value: string) {
 
 function renderOnly() {
   renderEditorLineNumbers()
-  renderPreview(editor.value)
   markdown = editor.value
   updateCount()
   schedulePersist()
   updateDocumentSaveState()
+  if (largePreviewTimer) clearTimeout(largePreviewTimer)
+  if (editor.value.length > LARGE_DOCUMENT_CHARS) {
+    largePreviewTimer = setTimeout(() => {
+      largePreviewTimer = null
+      renderPreview(editor.value)
+    }, LARGE_PREVIEW_DELAY_MS)
+  } else {
+    renderPreview(editor.value)
+  }
 }
 
 function recordUndoState() {
   const value = editor.value
+  if (value.length > LARGE_DOCUMENT_CHARS) return
   if (undoStack.at(-1)?.value === value) return
   undoStack.push({
     value,
@@ -1030,32 +1103,64 @@ function imageMimeType(source: string) {
   return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml' } as Record<string, string>)[extension || ''] || 'application/octet-stream'
 }
 
-async function resolvePreviewImages() {
-  if (!isTauri() || !currentFile) return
-  const images = [...preview.querySelectorAll<HTMLImageElement>('img[src]')]
-  for (const image of images) {
-    const source = image.getAttribute('src') || ''
-    try {
-      const path = await resolveLocalImagePath(source, currentFile)
-      if (!path) continue
-      const bytes = await readFileBytes(path)
-      const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: imageMimeType(source) }))
-      if (preview.contains(image)) {
-        image.src = url
-        previewImageObjectUrls.add(url)
-      } else {
-        URL.revokeObjectURL(url)
-      }
-    } catch {
-      // 路径无效时保留原始 Markdown 地址，让浏览器显示加载失败状态。
+async function loadPreviewImage(image: HTMLImageElement) {
+  const source = image.dataset.markflowSrc || ''
+  if (!source || image.dataset.markflowLoaded === 'true') return
+  image.dataset.markflowLoaded = 'true'
+  try {
+    if (/^data:/i.test(source)) {
+      if (preview.contains(image)) image.src = source
+      return
     }
+    if (!isTauri() || !currentFile) {
+      if (preview.contains(image)) image.src = source
+      return
+    }
+    const path = await resolveLocalImagePath(source, currentFile)
+    if (!path) {
+      if (preview.contains(image)) image.src = source
+      return
+    }
+    const bytes = await readFileBytes(path)
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: imageMimeType(source) }))
+    if (preview.contains(image)) {
+      image.src = url
+      previewImageObjectUrls.add(url)
+    } else {
+      URL.revokeObjectURL(url)
+    }
+  } catch {
+    image.removeAttribute('data-markflow-loaded')
   }
+}
+
+function resolvePreviewImages() {
+  previewImageObserver?.disconnect()
+  previewImageObserver = null
+  const images = [...preview.querySelectorAll<HTMLImageElement>('img[data-markflow-src]')]
+  if (!images.length) return
+  const load = (image: HTMLImageElement) => {
+    previewImageObserver?.unobserve(image)
+    void loadPreviewImage(image)
+  }
+  if (!('IntersectionObserver' in window)) {
+    images.forEach(load)
+    return
+  }
+  previewImageObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) load(entry.target as HTMLImageElement)
+    })
+  }, { root: preview, rootMargin: '1200px 0px' })
+  images.forEach((image) => previewImageObserver?.observe(image))
 }
 
 function renderPreview(value: string) {
   pendingPreviewRenderLine = editorSourceLineAtScroll()
   previewRenderSyncSuppressed = true
   markProgrammaticScroll(preview)
+  previewImageObserver?.disconnect()
+  previewImageObserver = null
   previewImageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
   previewImageObjectUrls.clear()
   preview.innerHTML = renderMarkdown(value)
@@ -1076,10 +1181,13 @@ function renderPreview(value: string) {
     wrapper.append(pre, button)
   })
   preview.querySelectorAll<HTMLImageElement>('img').forEach((image) => {
-    image.addEventListener('load', schedulePreviewScrollAnchors, { once: true })
+    image.addEventListener('load', () => {
+      image.classList.remove('is-pending')
+      schedulePreviewScrollAnchors()
+    }, { once: true })
   })
   schedulePreviewScrollAnchors()
-  void resolvePreviewImages()
+  resolvePreviewImages()
 }
 
 function bytesToDataUrl(bytes: number[], mimeType: string) {
@@ -1614,10 +1722,18 @@ async function autoSaveCurrentFile(trigger: 'interval' | 'window-blur' | 'file-s
 
   const target = currentFile
   const content = markdown
+  if (!await filePathStillExists(target)) {
+    clearPersistedSession()
+    setCurrentFile(null)
+    setDocumentSaveState('unsaved')
+    setStatus('原文件已被删除，自动保存已停止；请使用另存为选择新位置')
+    showToast('原文件已被删除，未自动重新创建', 'warning')
+    return 'skipped'
+  }
   setDocumentSaveState('saving')
   const operation = (async (): Promise<'saved' | 'failed'> => {
     try {
-      await writeMarkdownFile(target, content)
+      await writeExistingTextFile(target, content)
       if (currentFile === target && markdown === content) lastSavedMarkdown = content
       updateDocumentSaveState()
       autoSaveErrorShown = false
@@ -1626,6 +1742,14 @@ async function autoSaveCurrentFile(trigger: 'interval' | 'window-blur' | 'file-s
       else setStatus('已自动保存')
       return 'saved'
     } catch (err) {
+      if (!await filePathStillExists(target)) {
+        clearPersistedSession()
+        setCurrentFile(null)
+        setDocumentSaveState('unsaved')
+        setStatus('原文件已被删除，自动保存已停止；请使用另存为选择新位置')
+        showToast('原文件已被删除，未自动重新创建', 'warning')
+        return 'skipped'
+      }
       setDocumentSaveState('error')
       setStatus(`自动保存失败：${errMsg(err)}`)
       if (!autoSaveErrorShown) {
@@ -1656,12 +1780,92 @@ async function saveBeforeFileSwitch() {
 async function openMarkdownPath(path: string) {
   if (!await saveBeforeFileSwitch()) return
   const text = await readTextFile(path)
+  await applyOpenedMarkdown(path, text)
+}
+
+async function applyOpenedMarkdown(path: string, text: string) {
+  const hasInlineImages = text.includes('data:image/')
+  if (hasInlineImages) setBusy(true, '正在提取内嵌图片…')
+  let prepared: Awaited<ReturnType<typeof prepareMarkdownForOpen>>
+  try {
+    prepared = await prepareMarkdownForOpen(path, text)
+  } finally {
+    if (hasInlineImages) setBusy(false)
+  }
   setCurrentFile(path)
-  setMarkdown(text)
-  lastSavedMarkdown = text
+  setMarkdown(prepared.markdown)
+  lastSavedMarkdown = prepared.externalized ? null : prepared.markdown
   updateDocumentSaveState()
   await renderWorkspaceTree()
-  setStatus(`已打开 ${path}`)
+  if (prepared.externalized) {
+    setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 Ctrl+S 保存轻量 Markdown`)
+    showToast(`已提取 ${prepared.imageCount} 张内嵌图片，请保存 Markdown`, 'warning')
+  } else {
+    setStatus(`已打开 ${path}`)
+  }
+}
+
+function joinedPath(directory: string, name: string) {
+  const separator = directory.includes('\\') ? '\\' : '/'
+  return `${directory.replace(/[\\/]$/, '')}${separator}${name}`
+}
+
+async function imageDirectoryName(markdownPath: string) {
+  const stem = fileNameFromPath(markdownPath).replace(/\.[^.]+$/, '').trim()
+  if (workspaceRoot) {
+    const relative = await workspaceRelativePath(workspaceRoot, markdownPath)
+    const withoutExtension = relative.replace(/\.[^./\\]+$/, '')
+    return `${withoutExtension || stem || 'document'}.assets`
+  }
+  const pathBytes = new TextEncoder().encode(markdownPath.replace(/\\/g, '/').toLowerCase())
+  const digest = await crypto.subtle.digest('SHA-256', pathBytes)
+  const suffix = [...new Uint8Array(digest)].slice(0, 6).map((value) => value.toString(16).padStart(2, '0')).join('')
+  return `${stem || 'document'}-${suffix}.assets`
+}
+
+async function documentImageStorageDirectory(markdownPath: string) {
+  const root = workspaceRoot
+    ? await ensureWorkspaceImageDir(workspaceRoot)
+    : getStandaloneImageDir()
+  if (!root) throw new Error('请先配置无项目图片存储位置')
+  return joinedPath(root, await imageDirectoryName(markdownPath))
+}
+
+async function imageReferenceForDocument(markdownPath: string, imagePath: string) {
+  const relative = await relativePath(markdownPath, imagePath)
+  return /^[a-z]:[\\/]/i.test(relative) ? fileUrlFromPath(imagePath) : relative.replace(/\\/g, '/')
+}
+
+function extensionForImageType(contentType: string) {
+  const extensions: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/bmp': 'bmp',
+    'image/svg+xml': 'svg',
+  }
+  return extensions[contentType.toLowerCase()] || 'png'
+}
+
+async function prepareMarkdownForOpen(path: string, source: string) {
+  if (!source.includes('data:image/')) {
+    return { markdown: source, externalized: false, imageCount: 0 }
+  }
+  const directory = await documentImageStorageDirectory(path)
+  const result = await externalizeMarkdownDataImages(source, async (image) => {
+    const fileName = `image-${String(image.number).padStart(3, '0')}-${image.hash.slice(0, 8)}.${extensionForImageType(image.contentType)}`
+    const stored = await saveImageAsset(directory, fileName, image.bytes, false)
+    return markdownImagePath(await imageReferenceForDocument(path, stored.path))
+  })
+  return { markdown: result.markdown, externalized: result.imageCount > 0, imageCount: result.imageCount }
+}
+
+async function saveConvertedImages(directory: string, images: MarkdownImageAsset[]) {
+  for (const image of images) {
+    await saveImageAsset(directory, image.fileName, image.bytes, true)
+  }
 }
 
 async function openWorkspaceFolder() {
@@ -1760,8 +1964,7 @@ function fileUrlFromPath(path: string) {
 
 async function imageReferenceSource(path: string) {
   if (!currentFile) throw new Error('请先保存当前 Markdown 文件')
-  const relative = await relativePath(currentFile, path)
-  return /^[a-z]:[\\/]/i.test(relative) ? fileUrlFromPath(path) : relative.replace(/\\/g, '/')
+  return await imageReferenceForDocument(currentFile, path)
 }
 
 async function insertImagePaths(paths: string[]) {
@@ -1779,9 +1982,9 @@ async function imageStorageDirectory(retry: () => Promise<void>) {
     showToast('请先保存当前 Markdown 文件', 'warning')
     return null
   }
-  if (workspaceRoot) return await ensureWorkspaceImageDir(workspaceRoot)
+  if (workspaceRoot) return await documentImageStorageDirectory(currentFile)
   const configured = getStandaloneImageDir()
-  if (configured) return configured
+  if (configured) return joinedPath(configured, await imageDirectoryName(currentFile))
   pendingImageInsert = retry
   showToast('请先配置无项目图片存储位置', 'warning')
   openSettings('images')
@@ -1911,18 +2114,15 @@ async function openMarkdown() {
   const picked = await pickOpenFile([{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }], 'text')
   if (!picked) return
   if (!await saveBeforeFileSwitch()) return
-  setCurrentFile(picked.filePath)
-  setMarkdown(picked.text)
-  lastSavedMarkdown = picked.text
-  updateDocumentSaveState()
   workspaceRoot = null
   expandedTreeDirectories.clear()
-  await renderWorkspaceTree()
-  setStatus(`已打开 ${picked.filePath}`)
+  await applyOpenedMarkdown(picked.filePath, picked.text)
 }
 
 async function saveMarkdown() {
-  const target = currentFile ?? await pickSavePath('文档.md', [{ name: 'Markdown', extensions: ['md'] }])
+  const target = currentFile && await filePathStillExists(currentFile)
+    ? currentFile
+    : await pickSavePath('文档.md', [{ name: 'Markdown', extensions: ['md'] }])
   if (!target) return
   try {
     const content = markdown
@@ -1970,12 +2170,20 @@ async function convertOfficeToMarkdown(kind: 'docx' | 'xlsx') {
 
   setBusy(true, `正在转换 ${label}…`)
   try {
-    const md = kind === 'docx'
-      ? await docxToMarkdown(picked.buffer)
-      : xlsxToMarkdown(picked.buffer)
-
     const target = await pickSavePath(swapExtension(picked.filePath, '.md'), [{ name: 'Markdown', extensions: ['md'] }])
     if (!target) return
+    let md: string
+    if (kind === 'docx') {
+      const directory = await documentImageStorageDirectory(target)
+      const converted = await docxToMarkdownWithImages(
+        picked.buffer,
+        async (fileName) => markdownImagePath(await imageReferenceForDocument(target, joinedPath(directory, fileName))),
+      )
+      await saveConvertedImages(directory, converted.images)
+      md = converted.markdown
+    } else {
+      md = xlsxToMarkdown(picked.buffer)
+    }
     await writeTextFile(target, md)
     setCurrentFile(target)
     setMarkdown(md)
@@ -2020,13 +2228,20 @@ async function exportHtml() {
   }
 }
 
-function waitForPreviewImages() {
+async function waitForPreviewImages() {
+  previewImageObserver?.disconnect()
+  previewImageObserver = null
+  const lazyImages = [...preview.querySelectorAll<HTMLImageElement>('img[data-markflow-src]')]
+  await Promise.all(lazyImages.map((image) => loadPreviewImage(image)))
   const images = [...preview.querySelectorAll<HTMLImageElement>('img[src]')]
-  if (!images.length) return Promise.resolve()
-  return Promise.race([
+  if (!images.length) return
+  await Promise.race([
     Promise.all(images.map((image) => image.complete
       ? Promise.resolve()
-      : new Promise<void>((resolve) => image.addEventListener('load', () => resolve(), { once: true }))))
+      : new Promise<void>((resolve) => {
+          image.addEventListener('load', () => resolve(), { once: true })
+          image.addEventListener('error', () => resolve(), { once: true })
+        })))
       .then(() => undefined),
     new Promise<void>((resolve) => setTimeout(resolve, 2000)),
   ])
@@ -2208,15 +2423,24 @@ async function renameTreeEntry(target: { path: string; kind: string; isRoot: boo
 
 async function deleteTreeEntry(target: { path: string; kind: string; isRoot: boolean }) {
   if (!workspaceRoot || target.isRoot) return
+  const linkedImageDirectory = target.kind === 'markdown'
+    ? await documentImageStorageDirectory(target.path).catch(() => null)
+    : null
   const warning = target.kind === 'directory'
     ? `确定将文件夹“${fileNameFromPath(target.path)}”及其中内容移入系统回收站吗？`
+    : linkedImageDirectory
+      ? `确定将“${fileNameFromPath(target.path)}”及其图片资源目录一并移入系统回收站吗？`
     : `确定将“${fileNameFromPath(target.path)}”移入系统回收站吗？`
   if (!confirm(warning)) return
   const affectsCurrentFile = Boolean(currentFile && pathIsSameOrChild(currentFile, target.path))
   await trashWorkspaceEntry(workspaceRoot, target.path)
+  if (linkedImageDirectory && await pathExists(linkedImageDirectory)) {
+    await trashWorkspaceEntry(workspaceRoot, linkedImageDirectory)
+  }
   if (affectsCurrentFile) {
     setCurrentFile(null)
     lastSavedMarkdown = null
+    clearPersistedSession()
     updateDocumentSaveState()
     setStatus('当前文件已移入回收站，编辑内容保留为未保存文档')
   }
@@ -3273,18 +3497,24 @@ async function init() {
     const launchFile = await getLaunchFile()
     if (launchFile) {
       const text = await readTextFile(launchFile)
+      const prepared = await prepareMarkdownForOpen(launchFile, text)
       setCurrentFile(launchFile)
-      setMarkdown(text)
-      lastSavedMarkdown = text
+      setMarkdown(prepared.markdown)
+      lastSavedMarkdown = prepared.externalized ? null : prepared.markdown
       updateDocumentSaveState()
       await renderWorkspaceTree()
-      setStatus(`已打开 ${currentFile}`)
+      if (prepared.externalized) {
+        setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 Ctrl+S 保存轻量 Markdown`)
+        showToast(`已提取 ${prepared.imageCount} 张内嵌图片，请保存 Markdown`, 'warning')
+      } else {
+        setStatus(`已打开 ${currentFile}`)
+      }
       return
     }
   } catch (err) {
     setStatus(`打开传入文件失败：${errMsg(err)}`)
   }
-  restoreSession()
+  await restoreSession()
   await renderWorkspaceTree()
   setStatus('就绪')
 }

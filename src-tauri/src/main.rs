@@ -93,6 +93,11 @@ fn read_text_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("读取文件失败：{e}"))
 }
 
+#[tauri::command]
+fn path_exists(path: String) -> bool {
+    Path::new(&path).is_file()
+}
+
 /// 读取二进制文件为原始字节（用于 .docx / .xlsx），零拷贝传给前端
 #[tauri::command]
 fn read_file_bytes(path: String) -> Result<Response, String> {
@@ -104,6 +109,15 @@ fn read_file_bytes(path: String) -> Result<Response, String> {
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| format!("写入文件失败：{e}"))
+}
+
+#[tauri::command]
+fn write_existing_text_file(path: String, content: String) -> Result<(), String> {
+    let target = Path::new(&path);
+    if !target.is_file() {
+        return Err("原文件不存在，已停止自动保存".into());
+    }
+    fs::write(target, content).map_err(|e| format!("写入文件失败：{e}"))
 }
 
 /// 写入二进制文件（用于导出 .docx）
@@ -701,6 +715,18 @@ mod tests {
         .is_err());
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn path_exists_tracks_deleted_file() {
+        let root = test_directory("path-exists");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("document.md");
+        fs::write(&file, "content").unwrap();
+        assert!(path_exists(file.to_string_lossy().to_string()));
+        fs::remove_file(&file).unwrap();
+        assert!(!path_exists(file.to_string_lossy().to_string()));
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn main() {
@@ -710,8 +736,10 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             read_text_file,
+            path_exists,
             read_file_bytes,
             write_text_file,
+            write_existing_text_file,
             write_file_bytes,
             read_directory,
             create_workspace_file,

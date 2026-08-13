@@ -4,8 +4,20 @@ declare module 'markdown-it' {
 }
 
 declare module 'mammoth/mammoth.browser.js' {
+  type MammothImage = {
+    contentType: string
+    readAsArrayBuffer(): Promise<ArrayBuffer>
+  }
   const mammoth: {
-    convertToHtml(input: { arrayBuffer: ArrayBuffer }): Promise<{ value: string; messages: any[] }>
+    convertToHtml(
+      input: { arrayBuffer: ArrayBuffer },
+      options?: { convertImage?: (image: MammothImage, messages: any[]) => Promise<any[]> },
+    ): Promise<{ value: string; messages: any[] }>
+    images: {
+      imgElement(
+        converter: (image: MammothImage, messages: any[]) => Promise<Record<string, string>>,
+      ): (image: MammothImage, messages: any[]) => Promise<any[]>
+    }
   }
   export default mammoth
 }

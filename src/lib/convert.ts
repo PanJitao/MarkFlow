@@ -46,6 +46,116 @@ export async function docxToMarkdown(arrayBuffer: ArrayBuffer): Promise<string> 
   return turndown.turndown(result.value).trim()
 }
 
+export type MarkdownImageAsset = {
+  fileName: string
+  contentType: string
+  bytes: Uint8Array
+}
+
+export type DocxMarkdownResult = {
+  markdown: string
+  images: MarkdownImageAsset[]
+}
+
+function imageExtension(contentType: string) {
+  const normalized = contentType.toLowerCase()
+  const extensions: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/bmp': 'bmp',
+    'image/svg+xml': 'svg',
+  }
+  const extension = extensions[normalized]
+  if (!extension) throw new Error(`暂不支持从 Word 提取 ${contentType || '未知格式'} 图片`)
+  return extension
+}
+
+async function bytesHash(bytes: Uint8Array) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+/** Word(.docx) → Markdown + 独立图片资源，避免把 Base64 写进 Markdown。 */
+export async function docxToMarkdownWithImages(
+  arrayBuffer: ArrayBuffer,
+  imageReference: (fileName: string) => string | Promise<string>,
+): Promise<DocxMarkdownResult> {
+  const images: MarkdownImageAsset[] = []
+  const imageByHash = new Map<string, MarkdownImageAsset>()
+  const placeholderToImage = new Map<string, MarkdownImageAsset>()
+  let imageNumber = 0
+
+  const convertImage = mammoth.images.imgElement(async (image) => {
+    const bytes = new Uint8Array(await image.readAsArrayBuffer())
+    const hash = await bytesHash(bytes)
+    let asset = imageByHash.get(hash)
+    if (!asset) {
+      imageNumber += 1
+      asset = {
+        fileName: `image-${String(imageNumber).padStart(3, '0')}.${imageExtension(image.contentType)}`,
+        contentType: image.contentType,
+        bytes,
+      }
+      imageByHash.set(hash, asset)
+      images.push(asset)
+    }
+    const placeholder = `markflow-docx-image-${String(placeholderToImage.size + 1).padStart(4, '0')}`
+    placeholderToImage.set(placeholder, asset)
+    return { src: placeholder }
+  })
+
+  const result = await mammoth.convertToHtml({ arrayBuffer }, { convertImage })
+  let markdown = turndown.turndown(result.value).trim()
+  const usedImages = new Set<MarkdownImageAsset>()
+  for (const [placeholder, image] of placeholderToImage) {
+    if (!markdown.includes(placeholder)) continue
+    usedImages.add(image)
+    markdown = markdown.split(placeholder).join(await imageReference(image.fileName))
+  }
+  return { markdown, images: images.filter((image) => usedImages.has(image)) }
+}
+
+export type InlineMarkdownImage = {
+  contentType: string
+  bytes: Uint8Array
+  number: number
+  hash: string
+}
+
+/** 把旧 Markdown 的 Base64 图片替换成外部引用；相同图片只写一次。 */
+export async function externalizeMarkdownDataImages(
+  source: string,
+  storeImage: (image: InlineMarkdownImage) => Promise<string>,
+): Promise<{ markdown: string; imageCount: number }> {
+  const pattern = /!\[([^\]]*)\]\((?:<)?data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)(?:>)?\)/gi
+  const parts: string[] = []
+  const storedByHash = new Map<string, string>()
+  let previousEnd = 0
+  let imageCount = 0
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(source)) !== null) {
+    imageCount += 1
+    parts.push(source.slice(previousEnd, match.index))
+    const bytes = Uint8Array.from(atob(match[3]), (character) => character.charCodeAt(0))
+    const hash = await bytesHash(bytes)
+    let reference = storedByHash.get(hash)
+    if (!reference) {
+      reference = await storeImage({ contentType: match[2], bytes, number: storedByHash.size + 1, hash })
+      storedByHash.set(hash, reference)
+    }
+    parts.push(`![${match[1]}](${reference})`)
+    previousEnd = pattern.lastIndex
+  }
+
+  if (!imageCount) return { markdown: source, imageCount: 0 }
+  parts.push(source.slice(previousEnd))
+  return { markdown: parts.join(''), imageCount }
+}
+
 // ---------- 表格解析（处理合并单元格 / 多段单元格）----------
 
 /** 把一个 <table> 节点转成 GFM Markdown 表格 */

@@ -44,9 +44,17 @@ export async function writeTextFile(path: string, content: string): Promise<void
   await invoke('write_text_file', { path, content })
 }
 
+export async function writeExistingTextFile(path: string, content: string): Promise<void> {
+  await invoke('write_existing_text_file', { path, content })
+}
+
 /** 按路径读取文本（用于启动时打开传入的文件） */
 export function readTextFile(path: string): Promise<string> {
   return invoke<string>('read_text_file', { path })
+}
+
+export function pathExists(path: string): Promise<boolean> {
+  return invoke<boolean>('path_exists', { path })
 }
 
 /** 按路径读取二进制文件，用于本地图片预览。 */

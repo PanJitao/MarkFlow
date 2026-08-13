@@ -12,6 +12,22 @@ const renderer = new MarkdownIt({
 const defaultValidateLink = renderer.validateLink
 renderer.validateLink = (url) => /^file:/i.test(url) || defaultValidateLink(url)
 
+const defaultImageRenderer = renderer.renderer.rules.image
+renderer.renderer.rules.image = (tokens, index, options, env, self) => {
+  const token = tokens[index]
+  const source = token.attrGet('src') || ''
+  token.attrSet('loading', 'lazy')
+  token.attrSet('decoding', 'async')
+  if (env?.lazyImages && !/^(?:https?:)?\/\//i.test(source)) {
+    token.attrSet('data-markflow-src', source)
+    token.attrSet('class', `${token.attrGet('class') || ''} preview-lazy-image is-pending`.trim())
+    token.attrSet('src', '')
+  }
+  return defaultImageRenderer
+    ? defaultImageRenderer(tokens, index, options, env, self)
+    : self.renderToken(tokens, index, options)
+}
+
 // 仅放行图片的本地 file: 地址；其他链接仍遵循 DOMPurify 默认协议白名单。
 if (typeof DOMPurify.addHook === 'function') {
   DOMPurify.addHook('uponSanitizeAttribute', (node, hookEvent) => {
@@ -63,8 +79,8 @@ renderer.core.ruler.push('source-line-attributes', (state) => {
 
 /** 把 Markdown 渲染成预览用的 HTML（经过消毒，防 XSS） */
 export function renderMarkdown(markdown: string): string {
-  return DOMPurify.sanitize(renderer.render(markdown, { sourceMap: true }), {
-    ADD_ATTR: ['style', 'target', 'data-source-line'],
+  return DOMPurify.sanitize(renderer.render(markdown, { sourceMap: true, lazyImages: true }), {
+    ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'loading', 'decoding'],
   })
 }
 

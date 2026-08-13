@@ -1,8 +1,8 @@
 // 转换逻辑冒烟测试：不依赖 Tauri，直接验证 docx/xlsx/md 互转
-import { markdownToDocxBlob, docxToMarkdown, xlsxToMarkdown } from '../src/lib/convert.ts'
+import { markdownToDocxBlob, docxToMarkdown, docxToMarkdownWithImages, externalizeMarkdownDataImages, xlsxToMarkdown } from '../src/lib/convert.ts'
 import { buildHtmlDocument } from '../src/lib/markdown.ts'
 import * as XLSX from 'xlsx'
-import { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, WidthType } from 'docx'
+import { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, ImageRun, WidthType } from 'docx'
 import mammoth from 'mammoth'
 
 let pass = 0
@@ -129,6 +129,37 @@ check('含工作表名', xmd.includes('成绩单'))
 check('含表头', xmd.includes('姓名') && xmd.includes('分数'))
 check('含数据', xmd.includes('张三') && xmd.includes('90'))
 check('含表格分隔行', xmd.includes('---'))
+
+console.log('测试：旧版 Base64 图片 Markdown 外置化')
+const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+X+3NAAAAAElFTkSuQmCC'
+const inlineImageMd = `![示例](data:image/png;base64,${tinyPng})\n\n![重复](data:image/png;base64,${tinyPng})`
+let storedInlineImages = 0
+const externalized = await externalizeMarkdownDataImages(inlineImageMd, async (image) => {
+  storedInlineImages += 1
+  return `sample.assets/image-${image.number}-${image.hash.slice(0, 8)}.png`
+})
+check('Base64 图片引用已移除', !externalized.markdown.includes('data:image/'))
+check('两个图片引用均保留', externalized.imageCount === 2)
+check('重复图片只保存一次', storedInlineImages === 1)
+check('两个引用复用同一路径', new Set([...externalized.markdown.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1])).size === 1)
+
+console.log('测试：带图片 Word → 外部图片 Markdown')
+const imageDoc = new Document({
+  sections: [{ children: [new Paragraph({ children: [new ImageRun({
+    data: Uint8Array.from(Buffer.from(tinyPng, 'base64')),
+    transformation: { width: 1, height: 1 },
+    type: 'png',
+  })] })] }],
+})
+const imageDocBlob = await Packer.toBlob(imageDoc)
+const imageDocResult = await docxToMarkdownWithImages(
+  await imageDocBlob.arrayBuffer(),
+  async (fileName) => `configured-images/${fileName}`,
+)
+check('Word 图片不再写入 Base64', !imageDocResult.markdown.includes('data:image/'))
+check('Word 图片支持异步生成设置目录引用', imageDocResult.markdown.includes('configured-images/image-001.png'))
+check('Word 图片引用未写入 Promise 字符串', !imageDocResult.markdown.includes('[object Promise]'))
+check('Word 图片资源被独立提取', imageDocResult.images.length === 1 && imageDocResult.images[0].bytes.length > 0)
 
 console.log(`\n结果：${pass} 通过，${fail} 失败`)
 process.exit(fail ? 1 : 0)

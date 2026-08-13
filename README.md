@@ -6,14 +6,14 @@
 
 本地优先的 Markdown 文档转换、编辑与文件夹工作台
 
-Markdown、Word、Excel、HTML 的转换、编辑、预览和文件夹管理都在一个桌面应用中完成。
+Markdown、Word、Excel、HTML、PDF 的转换、编辑、预览和文件夹管理都在一个桌面应用中完成。
 
-[![Version](https://img.shields.io/badge/version-0.3.22-1f7a8c.svg)](https://github.com/PanJitao/word-to-markdown/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.3.25-1f7a8c.svg)](https://github.com/PanJitao/MarkFlow/releases/latest)
 ![Tauri](https://img.shields.io/badge/desktop-Tauri%20v2-24c8db.svg)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3a6ea5.svg)
 [![License](https://img.shields.io/badge/license-MIT-4c956c.svg)](LICENSE)
 
-[下载最新版本](https://github.com/PanJitao/word-to-markdown/releases/latest) · [核心功能](#核心功能) · [使用方式](#使用方式) · [自行构建](#自行构建)
+[下载最新版本](https://github.com/PanJitao/MarkFlow/releases/latest) · [核心功能](#核心功能) · [使用方式](#使用方式) · [自行构建](#自行构建)
 
 </div>
 
@@ -21,19 +21,23 @@ Markdown、Word、Excel、HTML 的转换、编辑、预览和文件夹管理都�
 
 ## 项目简介
 
-MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown 源码编辑与实时预览，支持 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word 或独立 HTML。打开文件夹后，可在左侧文件树中浏览 Markdown 和图片资源。
+MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown 源码编辑与实时预览，支持 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word、HTML 或 PDF。打开文件夹后，可在左侧文件树中浏览 Markdown 和图片资源。
 
-当前源码版本为 `0.3.22`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
+当前源码版本为 `0.3.25`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
 
 ## 截图
 
 ### 文件夹工作区与实时预览
 
-![MarkFlow 0.3.16 主界面](docs/screenshots/markflow-0.3.16-main.png)
+![MarkFlow 0.3.25 主界面](docs/screenshots/markflow-0.3.25-main.png)
 
-### 文件菜单与最近文件夹
+### 设置概览
 
-![MarkFlow 文件夹菜单](docs/screenshots/markflow-0.3.16-folders.png)
+![MarkFlow 0.3.25 设置概览](docs/screenshots/markflow-0.3.25-settings.png)
+
+### 转换菜单
+
+![MarkFlow 0.3.25 转换菜单](docs/screenshots/markflow-0.3.25-convert.png)
 
 ## 核心功能
 
@@ -44,6 +48,7 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 - 在文件树中点击 Markdown 文件即可打开；点击图片可将相对于当前 Markdown 文件的路径插入编辑器。
 - “最近打开的文件夹”以右侧二级菜单显示，靠近窗口边缘时自动向左展开。
 - 文件菜单支持新建文件、新建文件夹、新建窗口、打开文件、打开文件夹、保存和另存为。
+- 文件树右键菜单支持重命名、在资源管理器打开、删除到系统回收站、新建文件/文件夹、复制路径和复制相对路径。
 
 ### Markdown 编辑与预览
 
@@ -57,7 +62,7 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 ### 表格、代码块与右键菜单
 
 - 预览表格可直接编辑单元格，悬停表格边界可新增或删除行、列；双击单元格可选中该单元格内容。
-- 代码块提供行号、JSON 键值高亮和复制图标，支持 Java、Python、JavaScript、Node.js、C、C++、C#、SQL、PowerShell、CMD/BAT 等语法高亮。
+- 代码块提供行号、JSON 键值高亮和复制图标，支持 Java、Python、JavaScript、Node.js、C、C++、C#、SQL、PowerShell、CMD/BAT、Apex、ABAP 和 Bash 等语法高亮。
 - 编辑器右键菜单提供复制、粘贴、JSON 格式化、插入表格、插入引用、插入图片和多语言代码块。
 - JSON 格式化失败时会显示具体行号、列号和解析原因。
 
@@ -66,7 +71,7 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 - 支持 `Ctrl/Command + 滚轮`、`Ctrl/Command + +` 和 `Ctrl/Command + -` 缩放编辑与预览内容，范围为 `70% - 180%`。
 - 支持 PNG、JPG、WebP、GIF、MP4、WebM 作为静态或动态背景素材，单个文件最大 `100 MB`。
 - 可设置背景底色、背景透明度、面板和按钮透明度、代码块背景透明度以及编辑器/预览字体颜色。
-- 支持自动反色和独立的面板背景模糊开关；设置会保存在本机。
+- 支持面板、上方菜单栏和下方状态栏分别设置背景模糊；设置会保存在本机。
 
 ### 文档转换
 
@@ -77,7 +82,16 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 | Word -> Markdown | 保留标题、列表、表格、合并单元格和图片标记等结构。 |
 | Excel -> Markdown | 将每个工作表转换为 Markdown 表格。 |
 | Markdown -> Word | 生成真实 `.docx`，支持标题、列表、表格、代码块、链接和嵌套文本格式。 |
-| Markdown -> HTML | 导出带基础排版的独立 HTML 文档。 |
+| Markdown -> HTML | 导出带基础排版、图片引用和代码块样式的独立 HTML 文档。 |
+| Markdown -> PDF | 打开系统打印窗口，可将预览区内容保存为 PDF。 |
+
+### 图片与资源管理
+
+- Word 转 Markdown 时将图片写入独立资源目录，Markdown 仅保存相对路径，避免把图片 Base64 写入正文。
+- 打开文件夹时自动使用该工作区的 `img` 目录；单独打开 Markdown 时使用设置中配置的“无项目图片存储位置”。
+- 支持图片粘贴、拖拽、导入、直接引用本地路径和 HTML 导出；已命名图片保留原文件名。
+- 删除 Markdown 文件时，其对应的引用图片资源目录一并移入系统回收站；重命名图片前会提示风险，不会自动扫描并修改整个工作区的引用。
+- 大文档转换会优先外置图片资源，降低打开和渲染时的内存占用。
 
 ### 桌面集成
 
@@ -87,7 +101,7 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 
 ## 下载与使用
 
-前往 [GitHub Releases](https://github.com/PanJitao/word-to-markdown/releases/latest) 下载对应平台的安装包。
+前往 [GitHub Releases](https://github.com/PanJitao/MarkFlow/releases/latest) 下载对应平台的安装包。
 
 | 平台 | 文件名格式 |
 | --- | --- |
@@ -102,7 +116,7 @@ Windows 10/11 通常已内置 WebView2。少数旧系统如缺少该运行时，
 1. 选择“文件 -> 打开文件夹”，在左侧文件树中打开或新建 Markdown 文件。
 2. 在编辑区输入或粘贴 Markdown，右侧即时查看渲染结果。
 3. 使用右键“插入图片”或点击文件树中的图片，插入可随文件夹移动的相对路径。
-4. 使用“转换”菜单导入 Word、Excel，或将 Markdown 导出为 Word、HTML。
+4. 使用“转换”菜单导入 Word、Excel，或将 Markdown 导出为 Word、HTML、PDF。
 5. 使用“设置 -> 外观设置”调整背景、透明度、字体颜色和模糊效果。
 
 ## 快捷键
@@ -110,6 +124,7 @@ Windows 10/11 通常已内置 WebView2。少数旧系统如缺少该运行时，
 | 快捷键 | 功能 |
 | --- | --- |
 | `Ctrl/Command + B` | 展开或收起左侧文件树 |
+| `Ctrl/Command + S` | 保存当前 Markdown 文档 |
 | `Ctrl/Command + I` | 斜体 |
 | `Ctrl/Command + Z` | 撤回编辑区、工具栏或预览表格修改 |
 | `Ctrl/Command + 滚轮` | 放大或缩小内容显示 |
@@ -118,6 +133,8 @@ Windows 10/11 通常已内置 WebView2。少数旧系统如缺少该运行时，
 | `Tab` | 插入两个空格，或为选中行增加缩进 |
 | `Shift + Tab` | 减少缩进 |
 | `Esc` | 关闭菜单或对话框 |
+
+自动保存可在设置中独立配置 3–10 秒循环，并可按需启用窗口失焦和切换文件前保存。底部状态栏会显示当前策略及“已保存 / 未保存 / 保存中”状态。
 
 ## 自行构建
 
@@ -159,7 +176,7 @@ npm run tauri -- build --bundles nsis
 Windows NSIS 安装程序输出至：
 
 ```text
-src-tauri/target/release/bundle/nsis/MarkFlow_0.3.22_x64-setup.exe
+src-tauri/target/release/bundle/nsis/MarkFlow_0.3.25_x64-setup.exe
 ```
 
 ## 项目结构
@@ -195,3 +212,7 @@ src-tauri/target/release/bundle/nsis/MarkFlow_0.3.22_x64-setup.exe
 ## 许可证
 
 本项目采用 [MIT License](LICENSE) 开源。你可以使用、复制、修改、发布和商用本项目代码，但需保留原始版权和许可声明。
+
+## 项目地址
+
+[https://github.com/PanJitao/MarkFlow](https://github.com/PanJitao/MarkFlow)

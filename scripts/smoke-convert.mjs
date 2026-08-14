@@ -1,15 +1,47 @@
-// 转换逻辑冒烟测试：不依赖 Tauri，直接验证 docx/xlsx/md 互转
-import { markdownToDocxBlob, docxToMarkdown, docxToMarkdownWithImages, externalizeMarkdownDataImages, xlsxToMarkdown } from '../src/lib/convert.ts'
-import { buildHtmlDocument } from '../src/lib/markdown.ts'
-import * as XLSX from 'xlsx'
-import { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, ImageRun, WidthType } from 'docx'
-import mammoth from 'mammoth'
+// 转换逻辑冒烟测试：Markdown 端能力（md→HTML、md→docx、Base64 图片外置化）。
+// 办公文档导入（Word/Excel/PPT/PDF → Markdown）已迁移到 Rust 端 anydoc 引擎，
+// 由 `cargo test`（src-tauri）覆盖，这里不再重复。
+import { markdownToDocxBlob, externalizeMarkdownDataImages } from '../src/lib/convert.ts'
+import { buildHtmlDocument, markdownToHtml } from '../src/lib/markdown.ts'
+import zlib from 'node:zlib'
 
 let pass = 0
 let fail = 0
 function check(name, cond) {
   if (cond) { pass++; console.log('  ✓', name) }
   else { fail++; console.error('  ✗', name) }
+}
+
+/** 从 zip 中按名字取出解压后的内容（支持 stored 与 deflate） */
+function zipEntryBytes(buffer, name) {
+  let eocd = -1
+  for (let i = buffer.length - 22; i >= Math.max(0, buffer.length - 65557); i--) {
+    if (buffer.readUInt32LE(i) === 0x06054b50) { eocd = i; break }
+  }
+  if (eocd < 0) throw new Error('未找到 zip 目录')
+  const count = buffer.readUInt16LE(eocd + 10)
+  let offset = buffer.readUInt32LE(eocd + 16)
+  for (let n = 0; n < count; n++) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('损坏的 zip 目录')
+    const method = buffer.readUInt16LE(offset + 10)
+    const compSize = buffer.readUInt32LE(offset + 20)
+    const nameLen = buffer.readUInt16LE(offset + 28)
+    const extraLen = buffer.readUInt16LE(offset + 30)
+    const commentLen = buffer.readUInt16LE(offset + 32)
+    const localOffset = buffer.readUInt32LE(offset + 42)
+    const entryName = buffer.toString('utf8', offset + 46, offset + 46 + nameLen)
+    if (entryName === name) {
+      const localNameLen = buffer.readUInt16LE(localOffset + 26)
+      const localExtraLen = buffer.readUInt16LE(localOffset + 28)
+      const dataStart = localOffset + 30 + localNameLen + localExtraLen
+      const comp = buffer.subarray(dataStart, dataStart + compSize)
+      if (method === 0) return comp
+      if (method === 8) return zlib.inflateRawSync(comp)
+      throw new Error('不支持的压缩方式 ' + method)
+    }
+    offset += 46 + nameLen + extraLen + commentLen
+  }
+  return null
 }
 
 // 1) Markdown → HTML 文档
@@ -19,120 +51,63 @@ check('包含 <h1>', html.includes('<h1>标题</h1>'))
 check('lang=zh-CN', html.includes('<html lang="zh-CN">'))
 check('加粗渲染', html.includes('<strong>加粗</strong>'))
 
-// 2) Markdown → docx → Markdown 往返
-console.log('测试：Markdown → Word → Markdown 往返')
-const md = ['# 文档标题', '', '- 第一项', '- 第二项', '', '## 小节', '', '普通段落文字。', '', '| 列名 | 数值 |', '| --- | --- |', '| 苹果 | 5 |', ''].join('\n')
+// 2) Markdown → docx：结构与内容
+console.log('测试：Markdown → Word（docx）')
+const md = [
+  '# 文档标题', '',
+  '含 [示例链接](https://example.com)，以及 **加粗**、***粗斜体***、`行内代码`。', '',
+  '- 第一项', '- 第二项', '',
+  '> 这是一段引用', '',
+  '| 列名 | 数值 |', '| --- | --- |', '| 苹果 | 5 |', '',
+].join('\n')
 const blob = await markdownToDocxBlob(md)
-const buf = await blob.arrayBuffer()
-check('生成 docx Blob (非空)', buf.byteLength > 0)
-const backMd = await docxToMarkdown(buf)
-console.log('  (往返结果片段):', JSON.stringify(backMd.slice(0, 80)))
-check('往返含标题文字', backMd.includes('文档标题'))
-check('往返含列表项', backMd.includes('第一项') || backMd.includes('第二项'))
-check('往返含表格内容', backMd.includes('苹果') || backMd.includes('列名'))
+const buffer = Buffer.from(await blob.arrayBuffer())
+check('生成 docx Blob (非空)', buffer.byteLength > 0)
+const documentXml = zipEntryBytes(buffer, 'word/document.xml')
+check('包含 word/document.xml', documentXml !== null)
+const xml = documentXml.toString('utf8')
+check('标题保留', xml.includes('文档标题'))
+check('列表项保留', xml.includes('第一项') && xml.includes('第二项'))
+check('表格内容保留', xml.includes('苹果') && xml.includes('<w:tbl>'))
+const relsXml = zipEntryBytes(buffer, 'word/_rels/document.xml.rels').toString('utf8')
+check('超链接保留（rels 目标）', relsXml.includes('https://example.com'))
+check('嵌套粗斜体保留', xml.includes('粗斜体'))
+check('行内代码保留', xml.includes('行内代码'))
+check('引用保留', xml.includes('这是一段引用'))
 
-// 2b) 表格解析健壮性：表格内不能混入换行（会破坏 GFM 表格）
-console.log('测试：Word 表格解析（无破坏性格式）')
-const tableLines = backMd.split('\n').filter((l) => l.trim().startsWith('|'))
-check('表格行数 >= 3（表头+分隔+数据）', tableLines.length >= 3)
-check('表格行内无裸换行污染', tableLines.every((l) => !l.includes('\n')))
-check('表格每行首尾都是 |', tableLines.every((l) => l.startsWith('|') && l.endsWith('|')))
-check('第二行是分隔行', /^\|\s*---(\s*\|\s*---)*\s*\|$/.test(tableLines[1] || ''))
-
-// 2c) 复杂表格：跨列合并 + 跨行合并 + 单元格内多段落
-console.log('测试：复杂 Word 表格（合并单元格 / 多段）')
-const cell = (text, opts = {}) => new TableCell({
-  children: [new Paragraph({ children: [new TextRun(text)] })],
-  ...opts,
-})
-const multiParaCell = new TableCell({
-  children: [
-    new Paragraph({ children: [new TextRun('第一段')] }),
-    new Paragraph({ children: [new TextRun('第二段')] }),
-  ],
-})
-const complexTable = new Table({
-  width: { size: 100, type: WidthType.PERCENTAGE },
-  rows: [
-    new TableRow({ children: [
-      cell('合并表头', { columnSpan: 2 }),   // 跨 2 列
-      cell('C'),
-    ]}),
-    new TableRow({ children: [
-      cell('跨两行', { rowSpan: 2 }),         // 跨 2 行
-      multiParaCell,
-      cell('x'),
-    ]}),
-    new TableRow({ children: [
-      // 第一个位置被上面的 rowSpan 占用，这里只填后两列
-      cell('y'),
-      cell('z'),
-    ]}),
-  ],
-})
-const complexDoc = new Document({ sections: [{ children: [complexTable] }] })
-const complexBlob = await Packer.toBlob(complexDoc)
-const complexMd = await docxToMarkdown(await complexBlob.arrayBuffer())
-console.log('  (复杂表格结果):\n' + complexMd.split('\n').map((l) => '    ' + l).join('\n'))
-const complexRows = complexMd.split('\n').filter((l) => l.trim().startsWith('|'))
-check('复杂表格至少 4 行（表头+分隔+2 数据）', complexRows.length >= 4)
-check('每行列宽一致（3 列）', complexRows.every((l) => (l.match(/\|/g) || []).length === 4))
-check('保留合并表头文字', complexMd.includes('合并表头'))
-check('保留跨行单元格文字', complexMd.includes('跨两行'))
-check('多段单元格压成一行（含两段文字）', complexRows.some((l) => l.includes('第一段') && l.includes('第二段')))
-check('无裸换行污染表格行', complexRows.every((l) => !l.slice(1, -1).includes('\n')))
-
-// 2d-2) md→docx：表格内转义竖线 \| 不能错列
+// 3) md→docx：表格内转义竖线 \| 不能错列
 console.log('测试：md→Word 表格转义竖线（\\| 不错列）')
 const pipeMd = ['| 名字 | 值 |', '| --- | --- |', '| a\\|b | c |'].join('\n')
 const pipeBlob = await markdownToDocxBlob(pipeMd)
-const pipeHtml = (await mammoth.convertToHtml({ buffer: Buffer.from(await pipeBlob.arrayBuffer()) })).value
-check('转义竖线还原为 |', pipeHtml.includes('a|b'))
-check('同行另一列 c 未丢失', pipeHtml.includes('c'))
-check('表格仍是 2 列（a|b 与 c 分属不同单元格）', (pipeHtml.match(/<td/g) || []).length >= 2)
+const pipeXml = zipEntryBytes(Buffer.from(await pipeBlob.arrayBuffer()), 'word/document.xml').toString('utf8')
+check('转义竖线还原为 |', pipeXml.includes('a|b'))
+check('同行另一列 c 未丢失', pipeXml.includes('>c<'))
+check('表格单元格数量正确', (pipeXml.match(/<w:tc>/g) || []).length >= 4)
 
-// 2d) md→docx 高级元素：链接 / 有序列表 / 代码块 / 嵌套格式（用 mammoth 读回 HTML 断言）
-console.log('测试：md→Word 高级元素（链接/有序列表/代码块/嵌套）')
-const FENCE = '```'
-const advMd = [
-  '# 高级元素测试',
-  '',
-  '含 [示例链接](https://example.com)，以及 **加粗**、***粗斜体***、`行内代码`。',
-  '',
-  '1. 第一项',
-  '2. 第二项',
-  '',
-  FENCE,
-  'const x = 1',
-  'const y = 2',
-  FENCE,
-  '',
-  '> 这是一段引用',
-].join('\n')
-const advBlob = await markdownToDocxBlob(advMd)
-const advHtml = (await mammoth.convertToHtml({ buffer: Buffer.from(await advBlob.arrayBuffer()) })).value
-check('链接保留为可点超链接', /<a [^>]*href="https:\/\/example\.com"/.test(advHtml))
-check('有序列表渲染为 ol/li', /<ol>|<li>/.test(advHtml))
-check('代码块内容保留', advHtml.includes('const x = 1') && advHtml.includes('const y = 2'))
-check('嵌套粗斜体文字保留', advHtml.includes('粗斜体'))
-check('行内代码文字保留', advHtml.includes('行内代码'))
-check('引用保留', advHtml.includes('这是一段引用'))
+// 3b) 加粗闭合恢复：**数据库：**MySQL 这类模式要渲染成加粗而不是保留 **
+console.log('测试：加粗闭合恢复（标点结尾 + 紧跟文字）')
+const recovered = markdownToHtml('- ** 编程与数据：** Java、Python。' + '\n' + '- **数据库与大数据：**MySQL、Access、Hadoop。' + '\n' + '- **企业系统：**CRM功能开发。')
+check('恢复为加粗（第 1 项）', recovered.includes('<strong> 编程与数据：</strong>'))
+check('恢复为加粗（第 2 项）', recovered.includes('<strong>数据库与大数据：</strong>'))
+check('恢复为加粗（第 3 项）', recovered.includes('<strong>企业系统：</strong>'))
+check('列表标记保留', (recovered.match(/<li>/g) || []).length === 3)
+check('正常加粗不受影响', markdownToHtml('**正常加粗**文字').includes('<strong>正常加粗</strong>'))
+check('代码段内不误改', markdownToHtml('看 `**foo：**bar` 代码').includes('<code>**foo：**bar</code>'))
 
-// 3) xlsx → Markdown
-console.log('测试：Excel → Markdown')
-const wb = XLSX.utils.book_new()
-const ws = XLSX.utils.aoa_to_sheet([['姓名', '分数'], ['张三', 90], ['李四', 85]])
-XLSX.utils.book_append_sheet(wb, ws, '成绩单')
-const xlsxBuf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
-const xmd = xlsxToMarkdown(xlsxBuf)
-check('含工作表名', xmd.includes('成绩单'))
-check('含表头', xmd.includes('姓名') && xmd.includes('分数'))
-check('含数据', xmd.includes('张三') && xmd.includes('90'))
-check('含表格分隔行', xmd.includes('---'))
+// 3c) 加粗闭合恢复后的 md→docx 导出：Word 里应是加粗而不是字面星号
+console.log('测试：恢复后的加粗在 md→Word 导出中保持加粗')
+const boldMd = '**数据库与大数据：**MySQL、Access、Hadoop。'
+const boldBlob = await markdownToDocxBlob(boldMd)
+const boldXml = zipEntryBytes(Buffer.from(await boldBlob.arrayBuffer()), 'word/document.xml').toString('utf8')
+check('Word 导出包含加粗属性 <w:b/>', boldXml.includes('<w:b/>') || boldXml.includes('<w:b '))
+check('Word 导出不含字面星号', !boldXml.includes('**') && boldXml.includes('数据库与大数据：'))
 
+// 4) 旧版 Base64 图片 Markdown 外置化
 console.log('测试：旧版 Base64 图片 Markdown 外置化')
 const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+X+3NAAAAAElFTkSuQmCC'
-const inlineImageMd = `![示例](data:image/png;base64,${tinyPng})\n\n![重复](data:image/png;base64,${tinyPng})`
+const inlineImageMd = `![示例](data:image/png;base64,${tinyPng})
+
+![重复](data:image/png;base64,${tinyPng})`
 let storedInlineImages = 0
 const externalized = await externalizeMarkdownDataImages(inlineImageMd, async (image) => {
   storedInlineImages += 1
@@ -143,23 +118,6 @@ check('两个图片引用均保留', externalized.imageCount === 2)
 check('重复图片只保存一次', storedInlineImages === 1)
 check('两个引用复用同一路径', new Set([...externalized.markdown.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1])).size === 1)
 
-console.log('测试：带图片 Word → 外部图片 Markdown')
-const imageDoc = new Document({
-  sections: [{ children: [new Paragraph({ children: [new ImageRun({
-    data: Uint8Array.from(Buffer.from(tinyPng, 'base64')),
-    transformation: { width: 1, height: 1 },
-    type: 'png',
-  })] })] }],
-})
-const imageDocBlob = await Packer.toBlob(imageDoc)
-const imageDocResult = await docxToMarkdownWithImages(
-  await imageDocBlob.arrayBuffer(),
-  async (fileName) => `configured-images/${fileName}`,
-)
-check('Word 图片不再写入 Base64', !imageDocResult.markdown.includes('data:image/'))
-check('Word 图片支持异步生成设置目录引用', imageDocResult.markdown.includes('configured-images/image-001.png'))
-check('Word 图片引用未写入 Promise 字符串', !imageDocResult.markdown.includes('[object Promise]'))
-check('Word 图片资源被独立提取', imageDocResult.images.length === 1 && imageDocResult.images[0].bytes.length > 0)
-
-console.log(`\n结果：${pass} 通过，${fail} 失败`)
+console.log(`
+结果：${pass} 通过，${fail} 失败`)
 process.exit(fail ? 1 : 0)

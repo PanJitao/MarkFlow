@@ -1,7 +1,7 @@
 {
   "name": "markflow",
   "private": true,
-  "version": "0.3.25",
+  "version": "0.3.26",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,11 +18,7 @@
     "docx": "^9.1.0",
     "dompurify": "^3.2.0",
     "highlight.js": "^11.11.1",
-    "mammoth": "^1.8.0",
-    "markdown-it": "^14.1.0",
-    "turndown": "^7.2.0",
-    "turndown-plugin-gfm": "^1.0.2",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "markdown-it": "^14.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

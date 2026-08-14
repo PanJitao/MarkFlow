@@ -19,13 +19,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
-import {
-  docxToMarkdownWithImages,
-  externalizeMarkdownDataImages,
-  xlsxToMarkdown,
-  markdownToDocxBlob,
-  type MarkdownImageAsset,
-} from './lib/convert'
+import { externalizeMarkdownDataImages, markdownToDocxBlob } from './lib/convert'
 import {
   clearBackgroundAsset,
   DEFAULT_APPEARANCE,
@@ -68,6 +62,9 @@ import {
   revealInFileManager,
   relativePath,
   resolveRelativePath,
+  convertOfficeToMarkdown as convertOfficeFile,
+  type OfficeConversionResult,
+  type ConvertFailure,
   newWindow,
   type DirectoryEntry,
 } from './lib/io'
@@ -86,13 +83,13 @@ hljs.registerLanguage('sql', sql)
 
 const SAMPLE = `# 欢迎使用 MarkFlow
 
-一个轻量桌面小工具，可以完成 **Markdown、Word、Excel、HTML** 之间的互相转换。
+一个轻量桌面小工具，可以完成 **Markdown、Word、Excel、PowerPoint、PDF、HTML** 之间的互相转换。
 
 ## 它能做什么
 
 - 左边直接写 Markdown，右边实时看到渲染效果
 - 把 Word（.docx）文档转成 Markdown
-- 把 Excel（.xlsx）表格转成 Markdown 表格
+- 把 Excel（.xlsx/.xls）表格转成 Markdown 表格
 - 把 Markdown 导出成排版好的 HTML 或 Word
 
 ## 怎么用
@@ -854,20 +851,52 @@ function setContentZoom(nextZoom: number) {
     return
   }
 
+  // 缩放会同时改变字体大小与尾部内边距，浏览器在重排 textarea/预览内容时可能把
+  // scrollTop 重置回顶部。这里分别记住缩放前「编辑区」和「预览区」各自的阅读位置
+  // （两栏可能不同步，例如编辑区被隐藏时），分多帧恢复并最终核对，确保缩放后
+  // 两栏都停留在原来的位置，而不是被拉到同一行或跳回顶端。
   const sourceLine = editorSourceLineAtScroll()
+  const previewAnchorLine = previewScrollAnchors.length > 0
+    ? Math.min(markdownLineCount(), Math.max(1, sourceLineForPreviewOffset(preview.scrollTop)))
+    : 0
+  const previewMaxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight)
+  const previewScrollRatio = previewMaxScroll > 0 ? preview.scrollTop / previewMaxScroll : 0
+  const previewTargetTop = () => (previewAnchorLine > 0
+    ? previewOffsetForSourceLine(previewAnchorLine)
+    : Math.max(0, preview.scrollHeight - preview.clientHeight) * previewScrollRatio)
+
   contentZoom = clamped
   restoringZoomScroll = true
   document.documentElement.style.setProperty('--content-scale', String(contentZoom / 100))
   zoomLevelEl.textContent = `${contentZoom}%`
   zoomLevelEl.setAttribute('aria-label', `内容显示比例 ${contentZoom}%`)
 
-  requestAnimationFrame(() => {
+  const restoreZoomScroll = () => {
     updateEditorLineNumberLayout()
     updatePreviewScrollAnchors()
     setSyncedScrollTop(editor, editorOffsetForSourceLine(sourceLine))
-    setSyncedScrollTop(preview, previewOffsetForSourceLine(sourceLine))
+    setSyncedScrollTop(preview, previewTargetTop())
     syncEditorLineNumbers()
-    requestAnimationFrame(() => { restoringZoomScroll = false })
+  }
+
+  requestAnimationFrame(() => {
+    restoreZoomScroll()
+    // 第二帧再恢复一次：行号/内边距重排引发的滚动重置可能发生在第一帧之后
+    requestAnimationFrame(() => {
+      restoreZoomScroll()
+      // 第三帧做最终核对，确保两栏都停在目标行，再恢复滚动同步
+      requestAnimationFrame(() => {
+        const editorTarget = editorOffsetForSourceLine(sourceLine)
+        if (Math.abs(editor.scrollTop - editorTarget) > 2) {
+          markProgrammaticScroll(editor)
+          editor.scrollTop = editorTarget
+        }
+        const previewTarget = previewTargetTop()
+        if (Math.abs(preview.scrollTop - previewTarget) > 2) setSyncedScrollTop(preview, previewTarget)
+        syncEditorLineNumbers()
+        restoringZoomScroll = false
+      })
+    })
   })
   const atLimit = contentZoom === CONTENT_ZOOM_MIN || contentZoom === CONTENT_ZOOM_MAX
   showZoomToast(atLimit ? `显示比例已达 ${contentZoom}%` : `内容显示 ${contentZoom}%`, atLimit ? 'warning' : 'success')
@@ -1862,12 +1891,6 @@ async function prepareMarkdownForOpen(path: string, source: string) {
   return { markdown: result.markdown, externalized: result.imageCount > 0, imageCount: result.imageCount }
 }
 
-async function saveConvertedImages(directory: string, images: MarkdownImageAsset[]) {
-  for (const image of images) {
-    await saveImageAsset(directory, image.fileName, image.bytes, true)
-  }
-}
-
 async function openWorkspaceFolder() {
   const folder = await pickOpenFolder()
   if (!folder) return
@@ -2160,40 +2183,87 @@ async function saveMarkdownAs() {
   }
 }
 
-async function convertOfficeToMarkdown(kind: 'docx' | 'xlsx') {
-  const label = kind === 'docx' ? 'Word' : 'Excel'
-  const picked = await pickOpenFile(
-    [{ name: label, extensions: [kind] }],
-    'bytes',
-  )
-  if (!picked) return
+// 每种导入入口对应的文件过滤与图片提取策略
+type ConvertImportKind = 'word' | 'excel' | 'powerpoint' | 'pdf' | 'document'
 
-  setBusy(true, `正在转换 ${label}…`)
+const CONVERT_IMPORTS: Record<ConvertImportKind, { label: string; extensions: string[]; withImages: boolean }> = {
+  word: { label: 'Word', extensions: ['docx', 'doc', 'docm'], withImages: true },
+  excel: { label: 'Excel', extensions: ['xlsx', 'xls', 'xlsm', 'xlsb'], withImages: false },
+  powerpoint: { label: 'PowerPoint', extensions: ['pptx', 'ppt', 'ppsx', 'pptm', 'ppsm', 'pps', 'pot'], withImages: true },
+  pdf: { label: 'PDF', extensions: ['pdf'], withImages: false },
+  document: { label: '文档', extensions: ['odt', 'ods', 'odp', 'rtf', 'epub', 'csv'], withImages: true },
+}
+
+/** 把后端返回的失败信息翻译成对用户友好、可操作的提示 */
+function convertFailureMessage(failure: ConvertFailure, kind: ConvertImportKind): string {
+  switch (failure.code) {
+    case 'encrypted':
+      return '文件已加密或受密码保护，请先解除密码再转换'
+    case 'unsupported':
+      return kind === 'pdf'
+        ? '这份 PDF 可能是扫描件（纯图片），无法直接提取文字。建议先用 OCR 工具识别后再转换'
+        : '无法识别该文件格式，或文件不含可提取的内容'
+    case 'malformed':
+      return '文件结构损坏或无法解析，请确认文件是否完整'
+    case 'resourceLimit':
+      return '文件内容过于庞大或复杂，超出了转换安全限制'
+    case 'missingPart':
+      return '文件缺少必要的内容部件，可能已损坏或不是有效的办公文档'
+    case 'io':
+      return '读取文件失败，请检查文件是否被占用或已删除'
+    default:
+      return failure.message || '转换失败'
+  }
+}
+
+function isConvertFailure(value: unknown): value is ConvertFailure {
+  return typeof value === 'object' && value !== null
+    && typeof (value as ConvertFailure).code === 'string'
+    && typeof (value as ConvertFailure).message === 'string'
+}
+
+async function convertOfficeToMarkdown(kind: ConvertImportKind) {
+  const config = CONVERT_IMPORTS[kind]
+  const picked = await pickFilePath([{ name: config.label, extensions: config.extensions }])
+  if (!picked) return
+  const fileName = fileNameFromPath(picked)
+
+  const target = await pickSavePath(swapExtension(picked, '.md'), [{ name: 'Markdown', extensions: ['md'] }])
+  if (!target) return
+
+  setBusy(true, `正在转换《${fileName}》…`)
   try {
-    const target = await pickSavePath(swapExtension(picked.filePath, '.md'), [{ name: 'Markdown', extensions: ['md'] }])
-    if (!target) return
-    let md: string
-    if (kind === 'docx') {
-      const directory = await documentImageStorageDirectory(target)
-      const converted = await docxToMarkdownWithImages(
-        picked.buffer,
-        async (fileName) => markdownImagePath(await imageReferenceForDocument(target, joinedPath(directory, fileName))),
-      )
-      await saveConvertedImages(directory, converted.images)
-      md = converted.markdown
-    } else {
-      md = xlsxToMarkdown(picked.buffer)
+    // 可能带内嵌图片的格式，把图片外置到图片资源目录；目录未配置时降级为纯文字
+    let imageDirectory: string | null = null
+    if (config.withImages) {
+      try {
+        imageDirectory = await documentImageStorageDirectory(target)
+      } catch (error) {
+        showToast(`未配置图片存储位置，图片将以文字说明保留：${errMsg(error)}`, 'warning')
+      }
     }
-    await writeTextFile(target, md)
+
+    const converted = await convertOfficeFile(picked, imageDirectory, target)
+
+    await writeTextFile(target, converted.markdown)
     setCurrentFile(target)
-    setMarkdown(md)
-    lastSavedMarkdown = md
+    setMarkdown(converted.markdown)
+    lastSavedMarkdown = converted.markdown
     updateDocumentSaveState()
-    setStatus(`已把 ${label} 文件转换成 Markdown`)
-    showToast(`已把 ${label} 转成 Markdown`, 'success')
+    if (workspaceRoot) await renderWorkspaceTree()
+
+    const charCount = converted.markdown.replace(/\s+/g, '').length
+    const imageNote = converted.imageCount > 0 ? `，提取 ${converted.imageCount} 张图片` : ''
+    setStatus(`已把《${fileName}》转换成 Markdown（${converted.format}，共 ${charCount} 字符${imageNote}）`)
+    showToast(`已把《${fileName}》转成 Markdown${imageNote}`, 'success')
+    if (converted.skippedImages > 0) {
+      showToast(`文档中有 ${converted.skippedImages} 张图片无法提取，已保留为文字说明`, 'warning')
+    }
   } catch (err) {
-    setStatus(`转换失败：${errMsg(err)}`)
-    showToast(`转换失败：${errMsg(err)}`, 'error')
+    const failure = isConvertFailure(err) ? err : null
+    const message = failure ? convertFailureMessage(failure, kind) : errMsg(err)
+    setStatus(`转换失败：${message}`)
+    showToast(message, 'error')
   } finally {
     setBusy(false)
   }
@@ -2340,8 +2410,11 @@ document.querySelectorAll<HTMLButtonElement>('[data-file]').forEach((btn) => {
       : type === 'open-folder' ? openWorkspaceFolder
       : type === 'save-md' ? saveMarkdown
       : type === 'save-as' ? saveMarkdownAs
-      : type === 'docx-to-md' ? () => convertOfficeToMarkdown('docx')
-      : type === 'xlsx-to-md' ? () => convertOfficeToMarkdown('xlsx')
+      : type === 'word-to-md' ? () => convertOfficeToMarkdown('word')
+      : type === 'excel-to-md' ? () => convertOfficeToMarkdown('excel')
+      : type === 'ppt-to-md' ? () => convertOfficeToMarkdown('powerpoint')
+      : type === 'pdf-to-md' ? () => convertOfficeToMarkdown('pdf')
+      : type === 'doc-to-md' ? () => convertOfficeToMarkdown('document')
       : type === 'md-to-docx' ? exportDocx
       : type === 'export-html' ? exportHtml
       : type === 'export-pdf' ? exportPdf

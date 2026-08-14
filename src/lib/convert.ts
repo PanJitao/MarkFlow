@@ -1,9 +1,7 @@
-// 文档格式互转：全部在浏览器里完成，不依赖任何后端
-import TurndownService from 'turndown'
-import * as turndownPluginGfm from 'turndown-plugin-gfm'
-import mammoth from 'mammoth/mammoth.browser.js'
-import * as XLSX from 'xlsx'
+// 文档格式互转：办公文档导入（Word/Excel/PPT/PDF 等 → Markdown）由 Rust 端 anydoc 引擎完成，
+// 这里保留 Markdown 端的能力：Base64 图片外置化 与 Markdown → Word 导出。
 import MarkdownIt from 'markdown-it'
+import { recoverBrokenBold } from './markdown.ts'
 import {
   Document,
   Packer,
@@ -20,103 +18,15 @@ import {
 } from 'docx'
 
 // 行内格式解析器（用于 md→docx，正确处理链接 / 嵌套加粗斜体 / 代码）
-const inlineMd = new MarkdownIt()
-
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  bulletListMarker: '-',
-  codeBlockStyle: 'fenced',
-})
-// 启用 GFM 的删除线、任务列表等规则（表格规则下面会被自定义的更强版本覆盖）
-turndown.use(turndownPluginGfm.gfm)
-// 自定义表格规则：处理合并单元格 + 多段单元格，转成规整的 GFM 表格
-turndown.addRule('table', {
-  filter: 'table',
-  replacement: (_content, node) => {
-    const el = node as HTMLElement
-    if (typeof (el as any).querySelectorAll !== 'function') return ''
-    const md = tableNodeToMarkdown(el)
-    return md ? `\n\n${md}\n\n` : ''
-  },
-})
-
-/** Word(.docx) → Markdown：先把 docx 转成 HTML，再转成 Markdown */
-export async function docxToMarkdown(arrayBuffer: ArrayBuffer): Promise<string> {
-  const result = await mammoth.convertToHtml({ arrayBuffer })
-  return turndown.turndown(result.value).trim()
-}
-
-export type MarkdownImageAsset = {
-  fileName: string
-  contentType: string
-  bytes: Uint8Array
-}
-
-export type DocxMarkdownResult = {
-  markdown: string
-  images: MarkdownImageAsset[]
-}
-
-function imageExtension(contentType: string) {
-  const normalized = contentType.toLowerCase()
-  const extensions: Record<string, string> = {
-    'image/png': 'png',
-    'image/jpeg': 'jpg',
-    'image/jpg': 'jpg',
-    'image/gif': 'gif',
-    'image/webp': 'webp',
-    'image/bmp': 'bmp',
-    'image/svg+xml': 'svg',
-  }
-  const extension = extensions[normalized]
-  if (!extension) throw new Error(`暂不支持从 Word 提取 ${contentType || '未知格式'} 图片`)
-  return extension
-}
+// 开启 html 以解析加粗闭合恢复产生的 <strong>/<em> 标签（见 inlineTokensToRuns 的处理）
+const inlineMd = new MarkdownIt({ html: true })
 
 async function bytesHash(bytes: Uint8Array) {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
 }
 
-/** Word(.docx) → Markdown + 独立图片资源，避免把 Base64 写进 Markdown。 */
-export async function docxToMarkdownWithImages(
-  arrayBuffer: ArrayBuffer,
-  imageReference: (fileName: string) => string | Promise<string>,
-): Promise<DocxMarkdownResult> {
-  const images: MarkdownImageAsset[] = []
-  const imageByHash = new Map<string, MarkdownImageAsset>()
-  const placeholderToImage = new Map<string, MarkdownImageAsset>()
-  let imageNumber = 0
 
-  const convertImage = mammoth.images.imgElement(async (image) => {
-    const bytes = new Uint8Array(await image.readAsArrayBuffer())
-    const hash = await bytesHash(bytes)
-    let asset = imageByHash.get(hash)
-    if (!asset) {
-      imageNumber += 1
-      asset = {
-        fileName: `image-${String(imageNumber).padStart(3, '0')}.${imageExtension(image.contentType)}`,
-        contentType: image.contentType,
-        bytes,
-      }
-      imageByHash.set(hash, asset)
-      images.push(asset)
-    }
-    const placeholder = `markflow-docx-image-${String(placeholderToImage.size + 1).padStart(4, '0')}`
-    placeholderToImage.set(placeholder, asset)
-    return { src: placeholder }
-  })
-
-  const result = await mammoth.convertToHtml({ arrayBuffer }, { convertImage })
-  let markdown = turndown.turndown(result.value).trim()
-  const usedImages = new Set<MarkdownImageAsset>()
-  for (const [placeholder, image] of placeholderToImage) {
-    if (!markdown.includes(placeholder)) continue
-    usedImages.add(image)
-    markdown = markdown.split(placeholder).join(await imageReference(image.fileName))
-  }
-  return { markdown, images: images.filter((image) => usedImages.has(image)) }
-}
 
 export type InlineMarkdownImage = {
   contentType: string
@@ -156,114 +66,6 @@ export async function externalizeMarkdownDataImages(
   return { markdown: parts.join(''), imageCount }
 }
 
-// ---------- 表格解析（处理合并单元格 / 多段单元格）----------
-
-/** 把一个 <table> 节点转成 GFM Markdown 表格 */
-function tableNodeToMarkdown(table: HTMLElement): string {
-  const rows = Array.from(table.querySelectorAll('tr'))
-  if (!rows.length) return ''
-
-  // 展开成二维网格：处理 colspan / rowspan
-  const grid: (string | null)[][] = []
-  rows.forEach((tr, r) => {
-    if (!grid[r]) grid[r] = []
-    const cells = Array.from(tr.querySelectorAll('td, th'))
-    let c = 0
-    for (const cell of cells) {
-      while (grid[r][c] !== undefined && grid[r][c] !== null) c++ // 跳过被 rowspan 占用的列
-      const text = cellToText(cell)
-      const colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10))
-      const rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10))
-      // 合并的单元格：文本放首个位置，其余位置留 null（渲染成空），不丢列
-      grid[r][c] = text
-      for (let i = 1; i < colspan; i++) grid[r][c + i] = null
-      for (let j = 1; j < rowspan; j++) {
-        if (!grid[r + j]) grid[r + j] = []
-        for (let i = 0; i < colspan; i++) grid[r + j][c + i] = null
-      }
-      c += colspan
-    }
-  })
-
-  const columnCount = grid.reduce((m, row) => Math.max(m, row.length), 0)
-  if (!columnCount) return ''
-
-  // 补齐每行列数，null -> 空字符串
-  const filled = grid.map((row) => {
-    const out: string[] = []
-    for (let i = 0; i < columnCount; i++) out.push(row[i] ?? '')
-    return out
-  })
-
-  const header = filled[0]
-  const body = filled.slice(1)
-  const separator = Array(columnCount).fill('---')
-  const fmt = (cells: string[]) => `| ${cells.map(escapeCell).join(' | ')} |`
-
-  const lines = [fmt(header), fmt(separator)]
-  // 至少保证有表体；只有一行表头时也补一行空表体，避免部分渲染器不显示
-  if (body.length) lines.push(...body.map(fmt))
-  else lines.push(fmt(Array(columnCount).fill('')))
-  return lines.join('\n')
-}
-
-/** 把单元格里的多段/换行压成单行文本（用 innerHTML + 正则，避免依赖 NodeList.forEach） */
-function cellToText(cell: Element): string {
-  const html: string = (cell as HTMLElement).innerHTML || (cell.textContent || '')
-  return htmlCellToText(html)
-}
-
-function htmlCellToText(html: string): string {
-  // 块级结束标签 / 换行标签先换成空格，避免相邻段落粘连
-  const spaced = html.replace(/<(?:br\s*\/?|\/p|\/div|\/li|\/h[1-6])>/gi, ' ')
-  const stripped = spaced.replace(/<[^>]+>/g, '')
-  const unescaped = stripped
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-  return unescaped.replace(/\s+/g, ' ').trim()
-}
-
-function escapeCell(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
-}
-
-
-/** Excel(.xlsx) → Markdown：每个工作表转成一个 Markdown 表格 */
-export function xlsxToMarkdown(arrayBuffer: ArrayBuffer): string {
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' })
-  const lines: string[] = ['# Excel 表格', '']
-
-  workbook.SheetNames.forEach((name: string) => {
-    lines.push(`## ${name}`)
-    const sheet = workbook.Sheets[name]
-    const rows = XLSX.utils.sheet_to_json<any[]>(sheet, {
-      header: 1,
-      raw: false,
-      defval: '',
-    })
-
-    if (!rows.length) {
-      lines.push('', '_空工作表_', '')
-      return
-    }
-
-    const normalized = rows.filter((row) => Array.isArray(row) && row.some((c) => String(c).trim() !== ''))
-    if (!normalized.length) {
-      lines.push('', '_空工作表_', '')
-      return
-    }
-
-    lines.push(...rowsToMarkdownTable(normalized), '')
-  })
-
-  return lines.join('\n').trim()
-}
-
-/** Markdown → Word(.docx)：逐行解析，用 docx 库构建真实 .docx */
 export async function markdownToDocxBlob(markdown: string): Promise<Blob> {
   const children: any[] = []
   const lines = markdown.split(/\r?\n/)
@@ -407,22 +209,6 @@ function buildCodeBlock(codeLines: string[]): Paragraph {
 
 // ---------- 内部辅助函数 ----------
 
-function rowsToMarkdownTable(rows: any[][]): string[] {
-  const columnCount = Math.max(...rows.map((r) => r.length))
-  const padded = rows.map((r) => {
-    const copy = r.slice(0, columnCount)
-    while (copy.length < columnCount) copy.push('')
-    return copy.map((c) => String(c ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ').trim())
-  })
-
-  const header = padded[0]
-  const body = padded.slice(1)
-  const separator = Array(columnCount).fill('---')
-
-  const formatRow = (cells: string[]) => `| ${cells.join(' | ')} |`
-  return [formatRow(header), formatRow(separator), ...body.map(formatRow)]
-}
-
 function isMarkdownTableHeader(lines: string[], index: number): boolean {
   if (index + 1 >= lines.length) return false
   const current = lines[index].trim()
@@ -494,12 +280,48 @@ function buildDocxTable(tableLines: string[]): Table {
 
 // 行内解析：用 markdown-it 的 token 流，正确处理链接 / 嵌套加粗斜体 / 代码 / 删除线
 function parseInlineRuns(text: string): (TextRun | ExternalHyperlink)[] {
+  // 先做加粗闭合恢复（parseInline 不经过 core 规则），保证「**数据库：**MySQL」也能导出为加粗
+  const recovered = recoverBrokenBold(text)
+  if (!recovered.includes('<strong') && !recovered.includes('<em')) {
+    return parseInlineRunsPlain(recovered, {})
+  }
+  // 恢复产生的 <strong>/<em> 会被 markdown-it 拆成独立标签 token，
+  // 这里按标签切段分别解析，再把样式叠加到各段上
+  const runs: (TextRun | ExternalHyperlink)[] = []
+  const stack: string[] = []
+  let previous = 0
+  const pattern = /<(\/?)(strong|em)>/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(recovered)) !== null) {
+    const segment = recovered.slice(previous, match.index)
+    previous = pattern.lastIndex
+    if (segment) runs.push(...parseInlineRunsPlain(segment, styleFromTagStack(stack)))
+    if (match[1]) {
+      const index = stack.lastIndexOf(match[2])
+      if (index !== -1) stack.splice(index, 1)
+    } else {
+      stack.push(match[2])
+    }
+  }
+  const tail = recovered.slice(previous)
+  if (tail) runs.push(...parseInlineRunsPlain(tail, styleFromTagStack(stack)))
+  return runs.length ? runs : [new TextRun(text)]
+}
+
+function styleFromTagStack(stack: string[]): Record<string, boolean> {
+  const style: Record<string, boolean> = {}
+  if (stack.includes('strong')) style.bold = true
+  if (stack.includes('em')) style.italics = true
+  return style
+}
+
+function parseInlineRunsPlain(text: string, baseStyle: Record<string, boolean>): (TextRun | ExternalHyperlink)[] {
   const tokens = inlineMd.parseInline(text, {})
   const children = tokens[0]?.children
-  if (!children || !children.length) return [new TextRun(text)]
+  if (!children || !children.length) return [new TextRun({ text, ...baseStyle })]
   const runs: (TextRun | ExternalHyperlink)[] = []
-  inlineTokensToRuns(children, {}, runs)
-  return runs.length ? runs : [new TextRun(text)]
+  inlineTokensToRuns(children, baseStyle, runs)
+  return runs.length ? runs : [new TextRun({ text, ...baseStyle })]
 }
 
 /** 递归把 markdown-it 行内 token 转成 docx TextRun / 超链接 */
@@ -536,6 +358,25 @@ function inlineTokensToRuns(tokens: any[], style: Record<string, any>, runs: (Te
         inlineTokensToRuns(inner, next, runs)
         i += inner.length + 2 // 跳过内部 token + open/close
         continue
+      }
+      case 'html_inline': {
+        // 加粗闭合恢复产生的 <strong>/<em>：还原为对应样式，而不是把标签当文字
+        const strongMatch = /^<strong>([\s\S]*)<\/strong>$/.exec(t.content)
+        if (strongMatch) {
+          const inner = inlineMd.parseInline(strongMatch[1], {})
+          const children = inner[0]?.children
+          if (children && children.length) inlineTokensToRuns(children, { ...style, bold: true }, runs)
+          break
+        }
+        const emMatch = /^<em>([\s\S]*)<\/em>$/.exec(t.content)
+        if (emMatch) {
+          const inner = inlineMd.parseInline(emMatch[1], {})
+          const children = inner[0]?.children
+          if (children && children.length) inlineTokensToRuns(children, { ...style, italics: true }, runs)
+          break
+        }
+        if (t.content) runs.push(new TextRun({ text: t.content, ...style }))
+        break
       }
       case 'link_open': {
         const href = (t.attrGet && t.attrGet('href')) || ''

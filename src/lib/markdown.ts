@@ -39,6 +39,81 @@ if (typeof DOMPurify.addHook === 'function') {
   })
 }
 
+// ---------- 加粗闭合恢复 ----------
+// Word/anydoc 转换出的「加粗以标点结尾、后面紧跟文字（无空格）」模式
+// （如 **数据库与大数据：**MySQL）不符合 CommonMark 的闭合规则，markdown-it
+// 会把 ** 原样显示。渲染前把这类无法闭合的加粗恢复成 <strong> 标签。
+
+const CLOSING_PUNCT_RE = /[，。！？；：、,.!?;:）】》」』"'…)\]}>]/
+
+function isBoldBreakingChar(char: string | undefined): boolean {
+  return !!char && !/\s/.test(char) && !CLOSING_PUNCT_RE.test(char)
+}
+
+/** 把「无法被 CommonMark 闭合的加粗」恢复成 <strong>（跳过反引号代码段与转义字符）。 */
+export function recoverBrokenBold(source: string): string {
+  let out = ''
+  let i = 0
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '\\' && i + 1 < source.length) {
+      out += source[i] + source[i + 1]
+      i += 2
+      continue
+    }
+    if (ch === '`') {
+      // 整段跳过反引号代码段（支持多反引号围栏），避免改写代码内容
+      let end = i
+      while (end < source.length && source[end] === '`') end += 1
+      const fence = source.slice(i, end)
+      const close = source.indexOf(fence, end)
+      if (close === -1) {
+        out += source.slice(i)
+        break
+      }
+      out += source.slice(i, close + fence.length)
+      i = close + fence.length
+      continue
+    }
+    if (ch === '*' && source[i + 1] === '*' && source[i + 2] !== '*') {
+      const openNext = source[i + 2]
+      const closeIdx = source.indexOf('**', i + 2)
+      if (closeIdx !== -1 && closeIdx > i + 2) {
+        const content = source.slice(i + 2, closeIdx)
+        const afterClose = source[closeIdx + 2]
+        const lastChar = content[content.length - 1]
+        const singleLine = !content.includes('\n') && content.trim().length > 0
+        // 情况 1：闭合侧失效——内容以标点结尾，且 ** 后面紧跟文字/字母
+        const brokenClose = CLOSING_PUNCT_RE.test(lastChar) && isBoldBreakingChar(afterClose)
+        // 情况 2：开启侧失效——** 后面紧跟空白（如 ** 编程：**），整段无法成为加粗
+        const brokenOpen = !!openNext && /\s/.test(openNext)
+        if (singleLine && (brokenClose || brokenOpen)) {
+          out += '<strong>' + content + '</strong>'
+          i = closeIdx + 2
+          continue
+        }
+      }
+    }
+    out += ch
+    i += 1
+  }
+  return out
+}
+
+/** 把加粗闭合恢复规则装到指定 markdown-it 实例（在行内解析之前处理）。 */
+export function installBoldRecoveryRule(md: any) {
+  md.core.ruler.before('inline', 'markflow-recover-bold', (state: any) => {
+    for (const token of state.tokens) {
+      if (token.type === 'inline' && token.content.includes('**')) {
+        token.content = recoverBrokenBold(token.content)
+      }
+    }
+    return true
+  })
+}
+
+installBoldRecoveryRule(renderer)
+
 renderer.core.ruler.push('preserve-extra-blank-lines', (state) => {
   const lines = state.src.split(/\r?\n/)
   const tokens = []

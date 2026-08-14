@@ -657,6 +657,699 @@ fn reg_add(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- 文档转换：anydoc（Word/PowerPoint/Excel/ODF/RTF/EPUB/CSV/PDF → Markdown） ----------
+
+use anydoc::model::{AssetId, Block, CellSlot, Document, ImageSource, Inline, Note, TableKind};
+use anydoc::Format as AnyDocFormat;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Serialize)]
+struct OfficeConversion {
+    markdown: String,
+    format: String,
+    image_count: usize,
+    skipped_images: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ConvertFailure {
+    code: String,
+    message: String,
+}
+
+fn convert_failure(code: &str, message: impl Into<String>) -> ConvertFailure {
+    ConvertFailure { code: code.to_string(), message: message.into() }
+}
+
+fn map_anydoc_error(error: anydoc::ConvertError) -> ConvertFailure {
+    ConvertFailure { code: error.code().to_string(), message: error.to_string() }
+}
+
+fn anydoc_format_label(format: AnyDocFormat) -> &'static str {
+    match format {
+        AnyDocFormat::Doc => "Word (.doc)",
+        AnyDocFormat::Docx => "Word (.docx)",
+        AnyDocFormat::Odt => "OpenDocument 文本 (.odt)",
+        AnyDocFormat::Pdf => "PDF",
+        AnyDocFormat::Ppt => "PowerPoint (.ppt)",
+        AnyDocFormat::Pptx => "PowerPoint (.pptx)",
+        AnyDocFormat::Rtf => "RTF 文档",
+        AnyDocFormat::Epub => "EPUB",
+        AnyDocFormat::Excel => "Excel",
+        AnyDocFormat::Ods => "OpenDocument 表格 (.ods)",
+        AnyDocFormat::Odp => "OpenDocument 演示文稿 (.odp)",
+        AnyDocFormat::Csv => "CSV",
+    }
+}
+
+// 以下转义逻辑与 anydoc 0.1.9 的 Markdown 渲染器保持一致（MIT），
+// 保证内嵌图片渲染出的说明文字可以在输出 Markdown 中精确匹配并替换。
+#[derive(Clone, Copy, PartialEq)]
+enum InlineContext {
+    Block,
+    Heading,
+    TableCell,
+}
+
+#[derive(Clone, Copy, Default)]
+struct EscapeOpts {
+    at_line_start: bool,
+    styled: bool,
+    trailing_active: bool,
+    in_label: bool,
+}
+
+fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> String {
+    let EscapeOpts { at_line_start, styled, trailing_active, in_label } = opts;
+    let chars: Vec<char> = text.chars().collect();
+    let mut last: [Option<usize>; 5] = [None; 5]; // * _ ~ ` ]
+    for (j, &c) in chars.iter().enumerate() {
+        match c {
+            '*' => last[0] = Some(j),
+            '_' => last[1] = Some(j),
+            '~' => last[2] = Some(j),
+            '`' => last[3] = Some(j),
+            ']' => last[4] = Some(j),
+            _ => {}
+        }
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut line_has_content = !(at_line_start && ctx == InlineContext::Block);
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\n' {
+            out.push('\n');
+            if ctx == InlineContext::Block {
+                line_has_content = false;
+            }
+            i += 1;
+            continue;
+        }
+        let start_of_line = !line_has_content;
+        if !c.is_whitespace() {
+            line_has_content = true;
+        }
+        let next = chars.get(i + 1).copied();
+        let next_nonspace = next.map_or(trailing_active, |n| !n.is_whitespace());
+        let paired = |slot: usize| trailing_active || last[slot].is_some_and(|j| j > i);
+        let escape = match c {
+            '\\' => true,
+            ']' if in_label => true,
+            '`' => styled || paired(3),
+            '*' => styled || start_of_line || (next_nonspace && paired(0)),
+            '_' => {
+                let prev_alnum = i > 0 && chars[i - 1].is_alphanumeric();
+                let next_alnum = next.is_some_and(char::is_alphanumeric);
+                styled || (next_nonspace && !(prev_alnum && next_alnum) && paired(1))
+            }
+            '~' => styled || (next_nonspace && paired(2)),
+            '[' => in_label || paired(4),
+            '<' => next.is_some_and(|n| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?')),
+            '!' => next.is_none() && trailing_active,
+            '|' if ctx == InlineContext::TableCell => true,
+            '&' if entity_ahead(&chars[i..]) => {
+                out.push_str("&amp;");
+                i += 1;
+                continue;
+            }
+            '#' if start_of_line => {
+                let j = (i..chars.len()).find(|&j| chars[j] != '#').unwrap_or(chars.len());
+                chars.get(j).is_none_or(|n| n.is_whitespace())
+            }
+            '-' if start_of_line => !next_nonspace || line_is_only(&chars[i..], '-'),
+            '+' if start_of_line => !next_nonspace,
+            '>' if start_of_line => true,
+            '=' if start_of_line => line_is_only(&chars[i..], '='),
+            '0'..='9' if start_of_line => {
+                let mut j = i;
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if j < chars.len()
+                    && (chars[j] == '.' || chars[j] == ')')
+                    && chars.get(j + 1).is_none_or(|n| n.is_whitespace())
+                {
+                    out.extend(&chars[i..j]);
+                    out.push('\\');
+                    out.push(chars[j]);
+                    i = j + 1;
+                    continue;
+                }
+                false
+            }
+            _ => false,
+        };
+        if escape {
+            out.push('\\');
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+fn line_is_only(chars: &[char], c: char) -> bool {
+    chars.iter().take_while(|&&ch| ch != '\n').all(|&ch| ch == c || ch == ' ' || ch == '\t')
+}
+
+fn entity_ahead(chars: &[char]) -> bool {
+    let mut i = 1;
+    if i < chars.len() && chars[i] == '#' {
+        return true;
+    }
+    let mut seen = 0;
+    while i < chars.len() && chars[i].is_ascii_alphanumeric() {
+        i += 1;
+        seen += 1;
+    }
+    seen > 0 && i < chars.len() && chars[i] == ';'
+}
+
+/// 渲染顺序中的一张内嵌图片（含渲染上下文与前后文定位信息）。
+struct LocatedImage {
+    alt: String,
+    asset_id: usize,
+    ctx: InlineContext,
+    in_label: bool,
+    /// 同一块内、图片之前的文字尾部（用于把图片还原到原文位置）
+    prev_inline_tail: String,
+    /// 同一块内、图片之后的文字开头
+    next_inline_head: String,
+    /// 前一个块的文字尾部（图片独占一段时跨块定位用）
+    prev_block_tail: String,
+    /// 后一个块的文字开头
+    next_block_head: String,
+}
+
+fn tail_chars(text: &str, max: usize) -> String {
+    text.chars().rev().take(max).collect::<Vec<_>>().into_iter().rev().collect()
+}
+
+fn head_chars(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+fn block_plain_text(block: &Block) -> String {
+    match block {
+        Block::Paragraph(inlines) | Block::Heading { content: inlines, .. } => {
+            anydoc::model::inlines_to_plain_text(inlines)
+        }
+        _ => String::new(),
+    }
+}
+
+fn previous_block_tail(blocks: &[Block], index: usize) -> String {
+    for block in blocks[..index].iter().rev() {
+        let trimmed = tail_chars(block_plain_text(block).trim_end(), 16);
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+    }
+    String::new()
+}
+
+fn next_block_head(blocks: &[Block], index: usize) -> String {
+    for block in blocks[index + 1..].iter() {
+        let trimmed = head_chars(block_plain_text(block).trim_start(), 16);
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+    }
+    String::new()
+}
+
+fn collect_images_inlines(
+    inlines: &[Inline],
+    ctx: InlineContext,
+    in_label: bool,
+    prev_block_tail: &str,
+    next_block_head: &str,
+    images: &mut Vec<LocatedImage>,
+) {
+    for (index, inline) in inlines.iter().enumerate() {
+        match inline {
+            Inline::Image { alt, source } => {
+                if let ImageSource::Asset(AssetId(id)) = source {
+                    let prev_text = anydoc::model::inlines_to_plain_text(&inlines[..index]);
+                    let next_text = anydoc::model::inlines_to_plain_text(&inlines[index + 1..]);
+                    images.push(LocatedImage {
+                        alt: alt.clone(),
+                        asset_id: *id,
+                        ctx,
+                        in_label,
+                        prev_inline_tail: tail_chars(prev_text.trim_end(), 16),
+                        next_inline_head: head_chars(next_text.trim_start(), 16),
+                        prev_block_tail: prev_block_tail.to_string(),
+                        next_block_head: next_block_head.to_string(),
+                    });
+                }
+            }
+            Inline::Link { content, .. } => {
+                collect_images_inlines(content, ctx, true, prev_block_tail, next_block_head, images);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_images_blocks(blocks: &[Block], ctx: InlineContext, images: &mut Vec<LocatedImage>) {
+    for (index, block) in blocks.iter().enumerate() {
+        let prev_block_tail = previous_block_tail(blocks, index);
+        let next_block_head = next_block_head(blocks, index);
+        match block {
+            Block::Heading { content, .. } => {
+                collect_images_inlines(
+                    content,
+                    InlineContext::Heading,
+                    false,
+                    &prev_block_tail,
+                    &next_block_head,
+                    images,
+                );
+            }
+            Block::Paragraph(inlines) => collect_images_inlines(
+                inlines,
+                ctx,
+                false,
+                &prev_block_tail,
+                &next_block_head,
+                images,
+            ),
+            Block::List(list) => {
+                for item in &list.items {
+                    collect_images_blocks(&item.blocks, InlineContext::Block, images);
+                }
+            }
+            Block::Table(table) => {
+                // 单格布局表格会被渲染器展开成普通内容，沿用 Block 上下文
+                if table.kind == TableKind::Layout && table.is_single_cell() {
+                    if let Some(CellSlot::Origin(cell)) = table.grid.first().and_then(|row| row.first())
+                    {
+                        collect_images_blocks(&cell.blocks, InlineContext::Block, images);
+                    }
+                    continue;
+                }
+                for row in &table.grid {
+                    for slot in row {
+                        if let CellSlot::Origin(cell) = slot {
+                            collect_images_blocks(&cell.blocks, InlineContext::TableCell, images);
+                        }
+                    }
+                }
+            }
+            Block::BlockQuote(blocks) => collect_images_blocks(blocks, InlineContext::Block, images),
+            Block::CodeBlock { .. } | Block::Rule => {}
+        }
+    }
+}
+
+fn block_is_blank(block: &Block) -> bool {
+    match block {
+        Block::Paragraph(inlines) => anydoc::model::inlines_are_empty(inlines),
+        _ => false,
+    }
+}
+
+/// 按渲染顺序收集脚注/尾注 id（与 anydoc 渲染器的编号顺序一致）。
+fn collect_note_refs(
+    blocks: &[Block],
+    valid: &HashMap<&str, &Note>,
+    order: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    fn walk_inlines(
+        inlines: &[Inline],
+        valid: &HashMap<&str, &Note>,
+        order: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+    ) {
+        for inline in inlines {
+            match inline {
+                Inline::NoteRef(id) => {
+                    if let Some(note) = valid.get(id.as_str()) {
+                        if seen.insert(id.clone()) {
+                            order.push(id.clone());
+                            collect_note_refs(&note.blocks, valid, order, seen);
+                        }
+                    }
+                }
+                Inline::Link { content, .. } => walk_inlines(content, valid, order, seen),
+                _ => {}
+            }
+        }
+    }
+    for block in blocks {
+        match block {
+            Block::Paragraph(inlines) | Block::Heading { content: inlines, .. } => {
+                walk_inlines(inlines, valid, order, seen);
+            }
+            Block::List(list) => {
+                for item in &list.items {
+                    collect_note_refs(&item.blocks, valid, order, seen);
+                }
+            }
+            Block::Table(table) => {
+                for row in &table.grid {
+                    for slot in row {
+                        if let CellSlot::Origin(cell) = slot {
+                            collect_note_refs(&cell.blocks, valid, order, seen);
+                        }
+                    }
+                }
+            }
+            Block::BlockQuote(blocks) => collect_note_refs(blocks, valid, order, seen),
+            Block::CodeBlock { .. } | Block::Rule => {}
+        }
+    }
+}
+
+fn ordered_note_ids(document: &Document) -> Vec<String> {
+    let mut valid: HashMap<&str, &Note> = HashMap::new();
+    for note in &document.notes {
+        if !note.blocks.iter().all(block_is_blank) {
+            valid.entry(note.id.as_str()).or_insert(note);
+        }
+    }
+    let mut order: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    collect_note_refs(&document.blocks, &valid, &mut order, &mut seen);
+    for note in &document.notes {
+        if valid.contains_key(note.id.as_str()) && seen.insert(note.id.clone()) {
+            order.push(note.id.clone());
+        }
+    }
+    order
+}
+
+fn image_extension(media_type: &str) -> Option<&'static str> {
+    match media_type.to_ascii_lowercase().as_str() {
+        "image/png" => Some("png"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/bmp" => Some("bmp"),
+        "image/svg+xml" => Some("svg"),
+        _ => None,
+    }
+}
+
+struct ExtractedImage {
+    file_name: String,
+    image_markdown: String,
+    fallback_text: String,
+    bytes: Vec<u8>,
+}
+
+/// 在 Markdown 中定位一张图片的位置。
+enum ImageInsertion {
+    /// 替换一段已渲染的说明文字（精确匹配）
+    Replace { start: usize, end: usize },
+    /// 在指定字节偏移处插入图片 Markdown
+    InsertAt { position: usize, cross_block: bool },
+}
+
+fn locate_image_insertion(markdown: &str, cursor: usize, image: &LocatedImage) -> Option<ImageInsertion> {
+    // 1) 有说明文字：按渲染器转义后的文字精确匹配，最可靠
+    let rendered_alt = escape_text(
+        image.alt.trim(),
+        image.ctx,
+        EscapeOpts { in_label: image.in_label, ..Default::default() },
+    );
+    if !rendered_alt.is_empty() {
+        if let Some(found) = markdown[cursor..].find(&rendered_alt) {
+            let start = cursor + found;
+            return Some(ImageInsertion::Replace { start, end: start + rendered_alt.len() });
+        }
+    }
+
+    let search = &markdown[cursor..];
+    let has_prev = !image.prev_inline_tail.is_empty();
+    let has_next = !image.next_inline_head.is_empty();
+
+    // 2) 块内定位：前后文 sandwich。优先用「后文开头」作为插入点（插在样式标记内侧，
+    //    不破坏加粗/斜体配对），用「前文尾部」限定搜索窗口提高准确性。
+    if has_prev && has_next {
+        if let Some(prev_found) = search.find(&image.prev_inline_tail) {
+            let window_start = prev_found + image.prev_inline_tail.len();
+            let window_end = (window_start + 160).min(search.len());
+            if let Some(next_found) = search[window_start..window_end].find(&image.next_inline_head) {
+                return Some(ImageInsertion::InsertAt {
+                    position: cursor + window_start + next_found,
+                    cross_block: false,
+                });
+            }
+        }
+    }
+    if has_next {
+        if let Some(found) = search.find(&image.next_inline_head) {
+            return Some(ImageInsertion::InsertAt { position: cursor + found, cross_block: false });
+        }
+    }
+    if has_prev {
+        if let Some(found) = search.rfind(&image.prev_inline_tail) {
+            return Some(ImageInsertion::InsertAt {
+                position: cursor + found + image.prev_inline_tail.len(),
+                cross_block: false,
+            });
+        }
+    }
+
+    // 3) 跨块定位：图片独占一段时，插到前一块尾部之后，或后一块整行之前
+    //    （插到整行开头，避免破坏标题/列表等块级标记）
+    if !image.prev_block_tail.is_empty() {
+        if let Some(found) = search.rfind(&image.prev_block_tail) {
+            return Some(ImageInsertion::InsertAt {
+                position: cursor + found + image.prev_block_tail.len(),
+                cross_block: true,
+            });
+        }
+    }
+    if !image.next_block_head.is_empty() {
+        if let Some(found) = search.find(&image.next_block_head) {
+            let absolute = cursor + found;
+            let line_start = markdown[..absolute]
+                .rfind('\n')
+                .map(|pos| pos + 1)
+                .unwrap_or(0);
+            return Some(ImageInsertion::InsertAt { position: line_start, cross_block: true });
+        }
+    }
+    None
+}
+
+/// 把文档模型里的内嵌图片在 Markdown 中换成占位引用（尽量还原到原文位置）。
+/// 返回 (待落盘图片列表, 未能提取的图片数)。
+fn externalize_document_images(
+    document: &Document,
+    markdown: &mut String,
+    extract: bool,
+) -> (Vec<ExtractedImage>, usize) {
+    let mut located: Vec<LocatedImage> = Vec::new();
+    collect_images_blocks(&document.blocks, InlineContext::Block, &mut located);
+    for note_id in ordered_note_ids(document) {
+        if let Some(note) = document.notes.iter().find(|note| note.id == note_id) {
+            collect_images_blocks(&note.blocks, InlineContext::Block, &mut located);
+        }
+    }
+
+    let mut extracted: Vec<ExtractedImage> = Vec::new();
+    let mut appendix: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut name_by_asset: HashMap<usize, String> = HashMap::new();
+    let mut cursor = 0usize;
+    let mut skipped = 0usize;
+
+    for image in &located {
+        let Some(asset) = document.assets.get(image.asset_id) else {
+            skipped += 1;
+            continue;
+        };
+        let Some(extension) = image_extension(&asset.media_type) else {
+            skipped += 1;
+            continue;
+        };
+        let file_name = match name_by_asset.get(&image.asset_id) {
+            Some(name) => name.clone(),
+            None => {
+                let name = format!("image-{:03}.{}", name_by_asset.len() + 1, extension);
+                name_by_asset.insert(image.asset_id, name.clone());
+                name
+            }
+        };
+        if !extract {
+            skipped += 1;
+            continue;
+        }
+
+        // 图片的 Markdown 说明文字：优先原说明，没有时用编号占位
+        let rendered_alt = escape_text(
+            image.alt.trim(),
+            image.ctx,
+            EscapeOpts { in_label: image.in_label, ..Default::default() },
+        );
+        let stem = file_name.split('.').next().unwrap_or(&file_name);
+        let label = if rendered_alt.is_empty() { format!("图片 {}", stem) } else { rendered_alt.clone() };
+
+        let Some(hit) = locate_image_insertion(markdown, cursor, image) else {
+            appendix.push((file_name, asset.bytes.clone()));
+            continue;
+        };
+        let image_markdown = format!("![{}](markflow-asset-{})", label, file_name);
+        match hit {
+            ImageInsertion::Replace { start, end } => {
+                markdown.replace_range(start..end, &image_markdown);
+                cursor = start + image_markdown.len();
+            }
+            ImageInsertion::InsertAt { position, cross_block } => {
+                let block_separated = if cross_block {
+                    // 插在前一块尾部之后：\n\n![..](..)；插在整行之前：![..](..)\n\n
+                    let after_prev = !image.prev_block_tail.is_empty();
+                    if after_prev { format!("\n\n{image_markdown}") } else { format!("{image_markdown}\n\n") }
+                } else {
+                    image_markdown.clone()
+                };
+                markdown.insert_str(position, &block_separated);
+                cursor = position + block_separated.len();
+            }
+        }
+        extracted.push(ExtractedImage {
+            file_name,
+            image_markdown,
+            fallback_text: label,
+            bytes: asset.bytes.clone(),
+        });
+    }
+
+    // 完全无法定位的图片统一附在文末，避免丢失
+    if !appendix.is_empty() {
+        markdown.push_str("\n\n<!-- MarkFlow：以下图片无法还原到原文位置，按提取顺序附在文末 -->\n\n");
+        for (file_name, bytes) in appendix {
+            let stem = file_name.split('.').next().unwrap_or(&file_name);
+            let label = format!("图片 {}", stem);
+            let image_markdown = format!("![{}](markflow-asset-{})", label, file_name);
+            markdown.push_str(&image_markdown);
+            markdown.push('\n');
+            extracted.push(ExtractedImage { file_name, image_markdown, fallback_text: label, bytes });
+        }
+    }
+    (extracted, skipped)
+}
+
+/// 判断 Windows 盘符开头的绝对路径（与前端 imageReferenceForDocument 一致）。
+fn is_windows_absolute(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
+/// 与前端 fileUrlFromPath 一致的 file:// URL 生成。
+fn file_url_from_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let prefix = if normalized.starts_with('/') { "file://" } else { "file:///" };
+    let readable = normalized.replace('%', "%25").replace('#', "%23").replace('?', "%3F");
+    format!("{prefix}{readable}")
+}
+
+/// 生成 Markdown 图片引用：优先相对路径，跨盘时回退 file:// URL，含空白或括号时加尖括号。
+fn markdown_image_reference(md_target: &str, image_path: &str) -> String {
+    let base = Path::new(md_target).parent().unwrap_or_else(|| Path::new(""));
+    let relative = pathdiff::diff_paths(Path::new(image_path), base);
+    let Some(relative) = relative else {
+        return file_url_from_path(image_path);
+    };
+    let text = relative.to_string_lossy();
+    if is_windows_absolute(&text) {
+        return file_url_from_path(image_path);
+    }
+    let normalized = text.replace('\\', "/");
+    if normalized.chars().any(|c| c.is_whitespace() || c == '(' || c == ')') {
+        format!("<{normalized}>")
+    } else {
+        normalized
+    }
+}
+
+/// 把占位引用落盘为真实图片文件，并在 Markdown 中替换成相对引用。
+fn finalize_image_references(
+    markdown: &mut String,
+    images: &[ExtractedImage],
+    directory: &Path,
+    md_target: &str,
+) -> (usize, usize) {
+    let mut written = 0usize;
+    let mut skipped = 0usize;
+    for image in images {
+        match store_image_bytes(directory, &image.file_name, &image.bytes, true) {
+            Ok(result) => {
+                written += 1;
+                let reference = markdown_image_reference(md_target, &result.path);
+                let marker = format!("](markflow-asset-{})", image.file_name);
+                let replacement = format!("]({reference})");
+                while let Some(position) = markdown.find(&marker) {
+                    markdown.replace_range(position..position + marker.len(), &replacement);
+                }
+            }
+            Err(_) => {
+                skipped += 1;
+                while let Some(position) = markdown.find(&image.image_markdown) {
+                    markdown.replace_range(
+                        position..position + image.image_markdown.len(),
+                        &image.fallback_text,
+                    );
+                }
+            }
+        }
+    }
+    (written, skipped)
+}
+
+/// 把办公文档（Word/PowerPoint/Excel/ODF/RTF/EPUB/CSV/PDF）转换成 Markdown。
+/// 有内嵌图片且提供了 imageDirectory/mdTarget 时，图片会外置到图片目录并写相对引用。
+#[tauri::command]
+fn convert_office_to_markdown(
+    path: String,
+    image_directory: Option<String>,
+    md_target: Option<String>,
+) -> Result<OfficeConversion, ConvertFailure> {
+    let bytes =
+        fs::read(&path).map_err(|error| convert_failure("io", format!("读取文件失败：{error}")))?;
+    let format = AnyDocFormat::from_bytes(&bytes)
+        .or_else(|| AnyDocFormat::from_path(Path::new(&path)))
+        .ok_or_else(|| convert_failure("unsupported", "无法识别该文件格式，暂不支持转换"))?;
+    let label = anydoc_format_label(format).to_string();
+
+    if format == AnyDocFormat::Pdf {
+        let markdown = anydoc::to_markdown_bytes(&bytes, format).map_err(map_anydoc_error)?;
+        return Ok(OfficeConversion {
+            markdown: markdown.trim_end().to_string(),
+            format: label,
+            image_count: 0,
+            skipped_images: 0,
+        });
+    }
+
+    let document = anydoc::to_document(&bytes, format).map_err(map_anydoc_error)?;
+    let mut markdown = anydoc::to_markdown_bytes(&bytes, format).map_err(map_anydoc_error)?;
+
+    let extract = image_directory.is_some() && md_target.is_some();
+    let (images, mut skipped_images) =
+        externalize_document_images(&document, &mut markdown, extract);
+
+    let mut image_count = 0usize;
+    if let (Some(directory), Some(target)) = (image_directory.as_deref(), md_target.as_deref()) {
+        let (written, skipped) =
+            finalize_image_references(&mut markdown, &images, Path::new(directory), target);
+        image_count = written;
+        skipped_images += skipped;
+    }
+
+    Ok(OfficeConversion {
+        markdown: markdown.trim_end().to_string(),
+        format: label,
+        image_count,
+        skipped_images,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -727,7 +1420,266 @@ mod tests {
         assert!(!path_exists(file.to_string_lossy().to_string()));
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn csv_file_converts_to_markdown_table() {
+        let directory = test_directory("csv");
+        fs::create_dir_all(&directory).unwrap();
+        let csv = directory.join("数据.csv");
+        fs::write(&csv, "姓名,分数\n张三,90\n李四,85\n").unwrap();
+        let result = convert_office_to_markdown(csv.to_string_lossy().to_string(), None, None).unwrap();
+        assert!(result.markdown.contains("张三"));
+        assert!(result.markdown.contains("李四"));
+        assert!(result.markdown.contains('|'));
+        assert_eq!(result.image_count, 0);
+        assert!(result.format.contains("CSV"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unsupported_file_reports_friendly_code() {
+        let directory = test_directory("unsupported");
+        fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("notes.txt");
+        fs::write(&file, "hello").unwrap();
+        let result = convert_office_to_markdown(file.to_string_lossy().to_string(), None, None);
+        let failure = result.unwrap_err();
+        assert_eq!(failure.code, "unsupported");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// 构造一个带一张内嵌图片的最小 docx，验证 anydoc 提取 + 图片外置 + 相对引用。
+    fn minimal_docx_with_image() -> Vec<u8> {
+        use std::io::Write;
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Default Extension="png" ContentType="image/png"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"#;
+        let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"#;
+        let document_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>"#;
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+<w:body>
+<w:p><w:r><w:t>前文</w:t></w:r></w:p>
+<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="914400" cy="914400"/><wp:docPr id="1" name="Picture 1" descr="示意图"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="image1.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>
+<w:p><w:r><w:t>后文</w:t></w:r></w:p>
+</w:body>
+</w:document>"#;
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults/></w:styles>"#;
+        let png: [u8; 16] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0];
+        zip.start_file("[Content_Types].xml", options).unwrap();
+        zip.write_all(content_types.as_bytes()).unwrap();
+        zip.start_file("_rels/.rels", options).unwrap();
+        zip.write_all(root_rels.as_bytes()).unwrap();
+        zip.start_file("word/document.xml", options).unwrap();
+        zip.write_all(document_xml.as_bytes()).unwrap();
+        zip.start_file("word/_rels/document.xml.rels", options).unwrap();
+        zip.write_all(document_rels.as_bytes()).unwrap();
+        zip.start_file("word/styles.xml", options).unwrap();
+        zip.write_all(styles_xml.as_bytes()).unwrap();
+        zip.start_file("word/media/image1.png", options).unwrap();
+        zip.write_all(&png).unwrap();
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn docx_images_externalize_to_asset_directory() {
+        let directory = test_directory("docx-images");
+        fs::create_dir_all(&directory).unwrap();
+        let docx = directory.join("带图文档.docx");
+        fs::write(&docx, minimal_docx_with_image()).unwrap();
+        let assets = directory.join("assets");
+        let md = directory.join("输出.md");
+        let result = convert_office_to_markdown(
+            docx.to_string_lossy().to_string(),
+            Some(assets.to_string_lossy().to_string()),
+            Some(md.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert!(result.markdown.contains("前文"));
+        assert!(result.markdown.contains("后文"));
+        assert!(result.markdown.contains("![示意图](assets/image-001.png)"));
+        assert_eq!(result.image_count, 1);
+        assert_eq!(result.skipped_images, 0);
+        assert!(assets.join("image-001.png").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn image_alt_with_special_characters_replaces_correctly() {
+        use anydoc::model::{Asset, AssetId, Block, Document, ImageSource, Inline};
+        let document = Document {
+            blocks: vec![Block::Paragraph(vec![
+                Inline::plain("开头"),
+                Inline::Image { alt: "图 *片*".into(), source: ImageSource::Asset(AssetId(0)) },
+                Inline::plain("结尾"),
+            ])],
+            notes: vec![],
+            assets: vec![Asset {
+                id: AssetId(0),
+                media_type: "image/png".into(),
+                origin_part: "word/media/image1.png".into(),
+                bytes: vec![1, 2, 3],
+            }],
+        };
+        // anydoc 渲染器输出的转义形式：第一个 * 前加反斜杠，末尾的 * 保持原样
+        let mut markdown = "开头图 \\*片* 结尾".to_string();
+        let (images, skipped) = externalize_document_images(&document, &mut markdown, true);
+        assert_eq!(skipped, 0);
+        assert_eq!(images.len(), 1);
+        assert_eq!(markdown, "开头![图 \\*片*](markflow-asset-image-001.png) 结尾");
+    }
+
+    #[test]
+
+    /// 调试用：把环境变量 MARKFLOW_TEST_DOCX 指向真实 docx，模拟工作区布局完整转换一次。
+    #[test]
+    fn convert_external_docx_via_env() {
+        let Ok(path) = std::env::var("MARKFLOW_TEST_DOCX") else { return; };
+        let source = Path::new(&path);
+        assert!(source.exists(), "环境变量指向的文档不存在：{path}");
+        let workspace = source.parent().unwrap().parent().unwrap();
+        let img_root = workspace.join("img");
+        fs::create_dir_all(&img_root).unwrap();
+        let md_target = workspace.join("docs").join("转换结果.md");
+        fs::create_dir_all(md_target.parent().unwrap()).unwrap();
+        let image_dir = img_root.join("docs").join("转换结果.assets");
+
+        let result = convert_office_to_markdown(
+            source.to_string_lossy().to_string(),
+            Some(image_dir.to_string_lossy().to_string()),
+            Some(md_target.to_string_lossy().to_string()),
+        )
+        .unwrap_or_else(|error| panic!("转换失败 {:?}: {}", error.code, error.message));
+
+        println!("=== FORMAT: {} | images: {} | skipped: {} ===", result.format, result.image_count, result.skipped_images);
+        println!("{}", result.markdown);
+        if image_dir.exists() {
+            for entry in fs::read_dir(&image_dir).unwrap() {
+                println!("ASSET: {:?}", entry.unwrap().path());
+            }
+        }
+        let base = md_target.parent().unwrap();
+        for reference in extract_image_refs(&result.markdown) {
+            if reference.starts_with("file:") { continue; }
+            let resolved = base.join(&reference);
+            println!("REF: {reference} -> {} ({})", resolved.display(), if resolved.exists() { "存在" } else { "缺失!" });
+        }
+    }
+
+    /// 从 Markdown 中抽出所有图片引用（去掉尖括号）。
+    fn extract_image_refs(markdown: &str) -> Vec<String> {
+        let mut refs = Vec::new();
+        let mut rest = markdown;
+        while let Some(start) = rest.find("![") {
+            rest = &rest[start + 2..];
+            let Some(open) = rest.find("](") else { break };
+            let Some(close) = rest[open + 2..].find(')') else { break };
+            let mut reference = rest[open + 2..open + 2 + close].to_string();
+            if reference.starts_with('<') && reference.ends_with('>') {
+                reference = reference[1..reference.len() - 1].to_string();
+            }
+            refs.push(reference);
+            rest = &rest[open + 2 + close..];
+        }
+        refs
+    }
+
+    fn image_without_alt_stays_at_its_position() {
+        use anydoc::model::{Asset, AssetId, Block, Document, ImageSource, Inline};
+        let document = Document {
+            blocks: vec![Block::Paragraph(vec![
+                Inline::plain("只有文字"),
+                Inline::Image { alt: String::new(), source: ImageSource::Asset(AssetId(0)) },
+            ])],
+            notes: vec![],
+            assets: vec![Asset {
+                id: AssetId(0),
+                media_type: "image/png".into(),
+                origin_part: "word/media/image1.png".into(),
+                bytes: vec![1, 2, 3],
+            }],
+        };
+        let mut markdown = "只有文字".to_string();
+        let (images, skipped) = externalize_document_images(&document, &mut markdown, true);
+        assert_eq!(skipped, 0);
+        assert_eq!(images.len(), 1);
+        // 图片应插在“只有文字”之后，而不是被丢到文末附录
+        assert_eq!(markdown, "只有文字![图片 image-001](markflow-asset-image-001.png)");
+        assert!(!markdown.contains("无法还原到原文位置"));
+    }
+
+    #[test]
+    fn image_only_paragraph_lands_between_neighbour_blocks() {
+        use anydoc::model::{Asset, AssetId, Block, Document, ImageSource, Inline};
+        let document = Document {
+            blocks: vec![
+                Block::Paragraph(vec![Inline::plain("前一段落")]),
+                Block::Paragraph(vec![Inline::Image {
+                    alt: String::new(),
+                    source: ImageSource::Asset(AssetId(0)),
+                }]),
+                Block::Paragraph(vec![Inline::plain("后一段落")]),
+            ],
+            notes: vec![],
+            assets: vec![Asset {
+                id: AssetId(0),
+                media_type: "image/png".into(),
+                origin_part: "word/media/image1.png".into(),
+                bytes: vec![1, 2, 3],
+            }],
+        };
+        // 模拟渲染器输出：图片独占段落被完全省略，只剩两个文字段落
+        let mut markdown = "前一段落\n\n后一段落".to_string();
+        let (images, skipped) = externalize_document_images(&document, &mut markdown, true);
+        assert_eq!(skipped, 0);
+        assert_eq!(images.len(), 1);
+        // 图片应出现在两个段落之间，而不是文末
+        assert_eq!(
+            markdown,
+            "前一段落\n\n![图片 image-001](markflow-asset-image-001.png)\n\n后一段落"
+        );
+    }
+
+    #[test]
+    fn image_between_text_runs_stays_inline() {
+        use anydoc::model::{Asset, AssetId, Block, Document, ImageSource, Inline};
+        let document = Document {
+            blocks: vec![Block::Paragraph(vec![
+                Inline::plain("看图"),
+                Inline::Image { alt: String::new(), source: ImageSource::Asset(AssetId(0)) },
+                Inline::plain("然后继续阅读"),
+            ])],
+            notes: vec![],
+            assets: vec![Asset {
+                id: AssetId(0),
+                media_type: "image/png".into(),
+                origin_part: "word/media/image1.png".into(),
+                bytes: vec![1, 2, 3],
+            }],
+        };
+        let mut markdown = "看图然后继续阅读".to_string();
+        let (images, skipped) = externalize_document_images(&document, &mut markdown, true);
+        assert_eq!(skipped, 0);
+        assert_eq!(images.len(), 1);
+        assert_eq!(markdown, "看图![图片 image-001](markflow-asset-image-001.png)然后继续阅读");
+    }
 }
+
 
 fn main() {
     tauri::Builder::default()
@@ -762,6 +1714,7 @@ fn main() {
             get_icon_path,
             open_default_apps_settings,
             open_url,
+            convert_office_to_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("运行 MarkFlow 时出错");

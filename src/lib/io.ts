@@ -6,6 +6,34 @@ export type FileFilter = { name: string; extensions: string[] }
 export type DirectoryEntry = { name: string; path: string; is_dir: boolean }
 export type ImageAssetResult = { path: string; status: 'created' | 'reused' | 'conflict' }
 
+/** 办公文档 → Markdown 的转换结果（由 Rust 端 anydoc 引擎返回） */
+export type OfficeConversionResult = {
+  markdown: string
+  format: string
+  imageCount: number
+  skippedImages: number
+}
+
+/** 转换失败的结构化错误（code 为机器可读原因，message 为技术细节） */
+export type ConvertFailure = { code: string; message: string }
+
+/**
+ * 调用 Rust 端 anydoc 引擎，把 Word / PowerPoint / Excel / ODF / RTF / EPUB / CSV / PDF
+ * 转换成 Markdown。提供 imageDirectory 与 mdTarget 时，文档内嵌图片会外置到图片目录，
+ * 正文写入相对引用。
+ */
+export function convertOfficeToMarkdown(
+  path: string,
+  imageDirectory: string | null,
+  mdTarget: string | null,
+): Promise<OfficeConversionResult> {
+  return invoke<OfficeConversionResult>('convert_office_to_markdown', {
+    path,
+    imageDirectory,
+    mdTarget,
+  })
+}
+
 /** 让用户选一个文件；可选拿到文本内容或二进制（用于 docx/xlsx） */
 export async function pickOpenFile(filters: FileFilter[], mode: 'text' | 'bytes') {
   const path = await open({ filters, multiple: false, directory: false })

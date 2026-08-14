@@ -1,6 +1,6 @@
 [package]
 name = "markflow"
-version = "0.3.25"
+version = "0.3.26"
 description = "MarkFlow 文档转换工作台"
 authors = ["MarkFlow"]
 edition = "2021"
@@ -17,6 +17,10 @@ pathdiff = "0.2"
 trash = "5"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
+anydoc = "0.1.9"
+
+[dev-dependencies]
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [features]
 # 默认编译时使用本地前端产物

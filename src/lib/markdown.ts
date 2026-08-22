@@ -10,10 +10,10 @@ const renderer = new MarkdownIt({
 
 // markdown-it 默认拒绝 file:，但本地 Markdown 图片需要保留该协议，后续由桌面端读取为 Blob URL。
 const defaultValidateLink = renderer.validateLink
-renderer.validateLink = (url) => /^file:/i.test(url) || defaultValidateLink(url)
+renderer.validateLink = (url: string) => /^file:/i.test(url) || defaultValidateLink(url)
 
 const defaultImageRenderer = renderer.renderer.rules.image
-renderer.renderer.rules.image = (tokens, index, options, env, self) => {
+renderer.renderer.rules.image = (tokens: any, index: number, options: any, env: any, self: any) => {
   const token = tokens[index]
   const source = token.attrGet('src') || ''
   token.attrSet('loading', 'lazy')
@@ -114,12 +114,12 @@ export function installBoldRecoveryRule(md: any) {
 
 installBoldRecoveryRule(renderer)
 
-renderer.core.ruler.push('preserve-extra-blank-lines', (state) => {
+renderer.core.ruler.push('preserve-extra-blank-lines', (state: any) => {
   const lines = state.src.split(/\r?\n/)
-  const tokens = []
+  const tokens: any[] = []
   let previousBlockEnd: number | null = null
 
-  state.tokens.forEach((token) => {
+  state.tokens.forEach((token: any) => {
     const isTopLevelBlockStart = token.level === 0 && token.map && token.nesting !== -1
     if (isTopLevelBlockStart) {
       let blankRun = 0
@@ -144,24 +144,30 @@ renderer.core.ruler.push('preserve-extra-blank-lines', (state) => {
   state.tokens = tokens
 })
 
-renderer.core.ruler.push('source-line-attributes', (state) => {
+renderer.core.ruler.push('source-line-attributes', (state: any) => {
   if (!state.env?.sourceMap) return
-  state.tokens.forEach((token) => {
+  state.tokens.forEach((token: any) => {
     if (!token.map || token.type === 'inline' || token.nesting === -1) return
     token.attrSet('data-source-line', String(token.map[0] + 1))
   })
 })
 
-/** 把 Markdown 渲染成预览用的 HTML（经过消毒，防 XSS） */
-export function renderMarkdown(markdown: string): string {
-  return DOMPurify.sanitize(renderer.render(markdown, { sourceMap: true, lazyImages: true }), {
-    ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'loading', 'decoding'],
-  })
+const SANITIZE_OPTIONS = {
+  ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'loading', 'decoding'],
 }
 
-/** 把 Markdown 渲染成纯 HTML 片段（不消毒，仅用于导出受信任内容） */
+function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(html, SANITIZE_OPTIONS)
+}
+
+/** 把 Markdown 渲染成预览用的 HTML（经过消毒，防 XSS） */
+export function renderMarkdown(markdown: string): string {
+  return sanitizeHtml(renderer.render(markdown, { sourceMap: true, lazyImages: true }))
+}
+
+/** 把 Markdown 渲染成纯 HTML 片段（消毒后用于导出） */
 export function markdownToHtml(markdown: string): string {
-  return renderer.render(markdown)
+  return sanitizeHtml(renderer.render(markdown))
 }
 
 /** 生成一份完整的、可直接打开的 HTML 文档 */

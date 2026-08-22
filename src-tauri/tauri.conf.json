@@ -30,6 +30,16 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": ["md"],
+        "name": "Markdown",
+        "description": "Markdown 文档",
+        "mimeType": "text/markdown",
+        "role": "Editor",
+        "rank": "Default"
+      }
+    ],
     "targets": [
       "nsis",
       "msi",

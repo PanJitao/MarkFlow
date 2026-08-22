@@ -34,8 +34,20 @@ export function convertOfficeToMarkdown(
   })
 }
 
-/** 让用户选一个文件；可选拿到文本内容或二进制（用于 docx/xlsx） */
-export async function pickOpenFile(filters: FileFilter[], mode: 'text' | 'bytes') {
+/** 让用户选一个文件并读取文本内容 */
+export async function pickOpenFile(
+  filters: FileFilter[],
+  mode: 'text',
+): Promise<{ filePath: string; text: string } | null>
+/** 让用户选一个文件并读取二进制内容 */
+export async function pickOpenFile(
+  filters: FileFilter[],
+  mode: 'bytes',
+): Promise<{ filePath: string; buffer: ArrayBuffer } | null>
+export async function pickOpenFile(
+  filters: FileFilter[],
+  mode: 'text' | 'bytes',
+): Promise<{ filePath: string; text: string } | { filePath: string; buffer: ArrayBuffer } | null> {
   const path = await open({ filters, multiple: false, directory: false })
   if (!path) return null
   const filePath = typeof path === 'string' ? path : path[0]
@@ -90,6 +102,11 @@ export function readFileBytes(path: string): Promise<number[]> {
   return invoke<number[]>('read_file_bytes', { path })
 }
 
+/** 获取文件字节数（不读取内容，用于前端做大小上限判断） */
+export function fileSize(path: string): Promise<number> {
+  return invoke<number>('file_size', { path })
+}
+
 /** 把二进制写入指定路径（用于导出 docx） */
 export async function writeBytesFile(path: string, bytes: Uint8Array): Promise<void> {
   await invoke('write_file_bytes', { path, bytes: Array.from(bytes) })
@@ -108,7 +125,7 @@ export function swapExtension(filePath: string, ext: string): string {
 
 // ---------- 系统集成：文件关联 / 启动参数 ----------
 
-/** 启动时 Windows 传入的文件路径（双击 / 右键打开时） */
+/** 启动时系统传入的文件路径（双击 / 上下文菜单打开时） */
 export function getLaunchFile(): Promise<string | null> {
   return invoke<string | null>('get_launch_file')
 }

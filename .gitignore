@@ -16,6 +16,9 @@ ExchangeMD-rebuild-source.zip
 output/
 .playwright-cli/
 
+# UI 原型等临时设计稿
+design/
+
 # 本地环境与编辑器
 .DS_Store
 Thumbs.db

@@ -84,10 +84,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: 安装前端依赖
-        run: npm install
+        run: npm ci
 
       - name: 构建并发布
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

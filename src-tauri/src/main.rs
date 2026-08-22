@@ -87,10 +87,45 @@ use platform::{notify_association_changed, shell_open};
 
 // ---------- 文件读写（跨平台） ----------
 
+const MAX_TEXT_FILE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_BINARY_FILE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_IMPORT_FILE_BYTES: u64 = 100 * 1024 * 1024;
+
+/// 先查文件大小，超过上限直接拒绝，避免把超大文件整块读进内存。
+fn check_file_size(path: &Path, max_bytes: u64) -> Result<u64, String> {
+    let size = fs::metadata(path).map_err(|e| format!("读取文件信息失败：{e}"))?.len();
+    if size > max_bytes {
+        return Err(format!(
+            "文件过大（{:.1} MiB），已阻止读取以防内存溢出，上限为 {:.0} MiB",
+            size as f64 / (1024.0 * 1024.0),
+            max_bytes as f64 / (1024.0 * 1024.0),
+        ));
+    }
+    Ok(size)
+}
+
+/// 按 UTF-8 读取文本文件；失败时回退 GB18030/GBK，兼容中文 Windows 旧文件（GBK 编码）。
+/// UTF-8 BOM 会在读取时剥离，避免 \uFEFF 残留影响首行渲染。
+fn read_text_any_encoding(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("读取文件失败：{e}"))?;
+    let body = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        &bytes[3..]
+    } else {
+        &bytes[..]
+    };
+    if let Ok(text) = std::str::from_utf8(body) {
+        return Ok(text.to_string());
+    }
+    // 非 UTF-8（如 GBK/GB18030）：解码为 Unicode，个别非法序列替换为 U+FFFD
+    let (decoded, _, _) = encoding_rs::GB18030.decode(&bytes);
+    Ok(decoded.into_owned())
+}
+
 /// 读取文本文件（用于 .md / .html）
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| format!("读取文件失败：{e}"))
+    check_file_size(Path::new(&path), MAX_TEXT_FILE_BYTES)?;
+    read_text_any_encoding(Path::new(&path))
 }
 
 #[tauri::command]
@@ -101,8 +136,17 @@ fn path_exists(path: String) -> bool {
 /// 读取二进制文件为原始字节（用于 .docx / .xlsx），零拷贝传给前端
 #[tauri::command]
 fn read_file_bytes(path: String) -> Result<Response, String> {
+    check_file_size(Path::new(&path), MAX_BINARY_FILE_BYTES)?;
     let bytes = fs::read(&path).map_err(|e| format!("读取文件失败：{e}"))?;
     Ok(Response::new(bytes))
+}
+
+/// 获取文件字节数（不读取内容，供前端做内存上限判断）。
+#[tauri::command]
+fn file_size(path: String) -> Result<u64, String> {
+    fs::metadata(&path)
+        .map(|metadata| metadata.len())
+        .map_err(|e| format!("读取文件信息失败：{e}"))
 }
 
 /// 写入文本文件
@@ -224,9 +268,15 @@ fn store_image_bytes(
     }
     fs::create_dir_all(directory).map_err(|e| format!("创建图片目录失败：{e}"))?;
     let target = child_path(&directory.to_string_lossy(), file_name)?;
-    if target.exists() {
-        let existing = fs::read(&target).map_err(|e| format!("读取同名图片失败：{e}"))?;
-        if existing == bytes {
+    // 先读取同名文件：用于去重/冲突判断，也作为覆盖失败（rename 被锁）时恢复原图的备份。
+    // 图片上限 20 MiB，内存开销可控。
+    let existing = if target.exists() {
+        Some(fs::read(&target).map_err(|e| format!("读取同名图片失败：{e}"))?)
+    } else {
+        None
+    };
+    if let Some(existing_bytes) = &existing {
+        if existing_bytes == bytes {
             return Ok(ImageAssetResult {
                 path: target.to_string_lossy().to_string(),
                 status: "reused".into(),
@@ -255,6 +305,11 @@ fn store_image_bytes(
     }
     fs::rename(&temp, &target).map_err(|e| {
         let _ = fs::remove_file(&temp);
+        // Windows 上删除后 rename 失败（杀软锁定/占用/磁盘满）会丢原图：
+        // 用内存中的备份把原图写回，尽力避免永久丢失。
+        if let Some(existing_bytes) = &existing {
+            let _ = fs::write(&target, existing_bytes);
+        }
         format!("保存图片失败：{e}")
     })?;
     Ok(ImageAssetResult {
@@ -285,6 +340,7 @@ fn copy_image_asset(
         .and_then(|value| value.to_str())
         .ok_or_else(|| "无法读取图片文件名".to_string())?;
     validate_image_name(file_name)?;
+    check_file_size(source_path, MAX_IMAGE_BYTES as u64)?;
     let bytes = fs::read(source_path).map_err(|e| format!("读取图片失败：{e}"))?;
     store_image_bytes(Path::new(&directory), file_name, &bytes, overwrite)
 }
@@ -356,7 +412,7 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
         return command
             .spawn()
             .map(|_| ())
-            .map_err(|e| format!("打开资源管理器失败：{e}"));
+        .map_err(|e| format!("打开文件管理器失败：{e}"));
     }
     #[cfg(not(windows))]
     {
@@ -395,6 +451,7 @@ fn new_window(app: tauri::AppHandle) -> Result<(), String> {
         .title("MarkFlow 文档转换工作台")
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
+        .decorations(cfg!(target_os = "macos"))
         .build()
         .map(|_| ())
         .map_err(|e| format!("新建窗口失败：{e}"))
@@ -408,9 +465,15 @@ fn get_launch_file() -> Option<String> {
         .find(|a| MD_EXTS.iter().any(|ext| a.to_lowercase().ends_with(ext)))
 }
 
-/// 用系统默认浏览器打开外部链接（不在应用窗口内跳转）
+/// 用系统默认浏览器打开外部链接（不在应用窗口内跳转）。
+/// 仅放行常见安全协议；拒绝 file:、本地路径与自定义协议，防止文档内容诱导启动本地程序。
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
+    const ALLOWED_SCHEMES: [&str; 5] = ["http:", "https:", "mailto:", "tel:", "ftp:"];
+    let scheme = url.split(':').next().unwrap_or("").to_ascii_lowercase();
+    if !ALLOWED_SCHEMES.contains(&scheme.as_str()) {
+        return Err("仅允许打开 http/https/mailto/tel/ftp 链接".into());
+    }
     shell_open(&url)
 }
 
@@ -1238,7 +1301,7 @@ fn externalize_document_images(
 /// 判断 Windows 盘符开头的绝对路径（与前端 imageReferenceForDocument 一致）。
 fn is_windows_absolute(text: &str) -> bool {
     let bytes = text.as_bytes();
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
 
 /// 与前端 fileUrlFromPath 一致的 file:// URL 生成。
@@ -1305,11 +1368,27 @@ fn finalize_image_references(
 /// 把办公文档（Word/PowerPoint/Excel/ODF/RTF/EPUB/CSV/PDF）转换成 Markdown。
 /// 有内嵌图片且提供了 imageDirectory/mdTarget 时，图片会外置到图片目录并写相对引用。
 #[tauri::command]
-fn convert_office_to_markdown(
+async fn convert_office_to_markdown(
     path: String,
     image_directory: Option<String>,
     md_target: Option<String>,
 ) -> Result<OfficeConversion, ConvertFailure> {
+    // 解析耗时（docx/pptx/pdf 解包 + 渲染）放到阻塞线程池，避免占住 IPC/事件循环导致窗口假死
+    tauri::async_runtime::spawn_blocking(move || {
+        convert_office_to_markdown_blocking(path, image_directory, md_target)
+    })
+    .await
+    .map_err(|error| convert_failure("interrupted", format!("转换任务被中断：{error}")))?
+}
+
+/// 实际转换逻辑（同步执行；供命令与单元测试调用）
+fn convert_office_to_markdown_blocking(
+    path: String,
+    image_directory: Option<String>,
+    md_target: Option<String>,
+) -> Result<OfficeConversion, ConvertFailure> {
+    check_file_size(Path::new(&path), MAX_IMPORT_FILE_BYTES)
+        .map_err(|error| convert_failure("too_large", error))?;
     let bytes =
         fs::read(&path).map_err(|error| convert_failure("io", format!("读取文件失败：{error}")))?;
     let format = AnyDocFormat::from_bytes(&bytes)
@@ -1422,12 +1501,23 @@ mod tests {
     }
 
     #[test]
+    fn oversized_file_is_rejected_by_read_guard() {
+        let root = test_directory("size-limit");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("large.md");
+        fs::write(&file, "0123456789").unwrap();
+        assert!(check_file_size(&file, 5).is_err());
+        assert_eq!(check_file_size(&file, 100).unwrap(), 10);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn csv_file_converts_to_markdown_table() {
         let directory = test_directory("csv");
         fs::create_dir_all(&directory).unwrap();
         let csv = directory.join("数据.csv");
         fs::write(&csv, "姓名,分数\n张三,90\n李四,85\n").unwrap();
-        let result = convert_office_to_markdown(csv.to_string_lossy().to_string(), None, None).unwrap();
+        let result = convert_office_to_markdown_blocking(csv.to_string_lossy().to_string(), None, None).unwrap();
         assert!(result.markdown.contains("张三"));
         assert!(result.markdown.contains("李四"));
         assert!(result.markdown.contains('|'));
@@ -1442,7 +1532,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let file = directory.join("notes.txt");
         fs::write(&file, "hello").unwrap();
-        let result = convert_office_to_markdown(file.to_string_lossy().to_string(), None, None);
+        let result = convert_office_to_markdown_blocking(file.to_string_lossy().to_string(), None, None);
         let failure = result.unwrap_err();
         assert_eq!(failure.code, "unsupported");
         fs::remove_dir_all(directory).unwrap();
@@ -1504,7 +1594,7 @@ mod tests {
         fs::write(&docx, minimal_docx_with_image()).unwrap();
         let assets = directory.join("assets");
         let md = directory.join("输出.md");
-        let result = convert_office_to_markdown(
+        let result = convert_office_to_markdown_blocking(
             docx.to_string_lossy().to_string(),
             Some(assets.to_string_lossy().to_string()),
             Some(md.to_string_lossy().to_string()),
@@ -1547,7 +1637,6 @@ mod tests {
     #[test]
 
     /// 调试用：把环境变量 MARKFLOW_TEST_DOCX 指向真实 docx，模拟工作区布局完整转换一次。
-    #[test]
     fn convert_external_docx_via_env() {
         let Ok(path) = std::env::var("MARKFLOW_TEST_DOCX") else { return; };
         let source = Path::new(&path);
@@ -1559,7 +1648,7 @@ mod tests {
         fs::create_dir_all(md_target.parent().unwrap()).unwrap();
         let image_dir = img_root.join("docs").join("转换结果.assets");
 
-        let result = convert_office_to_markdown(
+        let result = convert_office_to_markdown_blocking(
             source.to_string_lossy().to_string(),
             Some(image_dir.to_string_lossy().to_string()),
             Some(md_target.to_string_lossy().to_string()),
@@ -1599,6 +1688,7 @@ mod tests {
         refs
     }
 
+    #[test]
     fn image_without_alt_stays_at_its_position() {
         use anydoc::model::{Asset, AssetId, Block, Document, ImageSource, Inline};
         let document = Document {
@@ -1686,10 +1776,17 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                main_window.set_decorations(cfg!(target_os = "macos"))?;
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             path_exists,
             read_file_bytes,
+            file_size,
             write_text_file,
             write_existing_text_file,
             write_file_bytes,

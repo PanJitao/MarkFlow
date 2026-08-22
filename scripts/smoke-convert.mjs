@@ -1,7 +1,9 @@
 // 转换逻辑冒烟测试：Markdown 端能力（md→HTML、md→docx、Base64 图片外置化）。
 // 办公文档导入（Word/Excel/PPT/PDF → Markdown）已迁移到 Rust 端 anydoc 引擎，
 // 由 `cargo test`（src-tauri）覆盖，这里不再重复。
-import { markdownToDocxBlob, externalizeMarkdownDataImages } from '../src/lib/convert.ts'
+import './jsdom-env.mjs'
+import { markdownToDocxBlob } from '../src/lib/convert.ts'
+import { externalizeMarkdownDataImages } from '../src/lib/externalize-image.ts'
 import { buildHtmlDocument, markdownToHtml } from '../src/lib/markdown.ts'
 import zlib from 'node:zlib'
 
@@ -50,6 +52,10 @@ const html = buildHtmlDocument('# 标题\n\n正文 **加粗**。', '测试')
 check('包含 <h1>', html.includes('<h1>标题</h1>'))
 check('lang=zh-CN', html.includes('<html lang="zh-CN">'))
 check('加粗渲染', html.includes('<strong>加粗</strong>'))
+
+const xssHtml = buildHtmlDocument('<script>alert(1)</script>\n\n<img src=x onerror=alert(2)>', 'xss')
+check('导出过滤 script 标签', !xssHtml.includes('<script'))
+check('导出过滤 onerror 属性', !xssHtml.includes('onerror'))
 
 // 2) Markdown → docx：结构与内容
 console.log('测试：Markdown → Word（docx）')
@@ -117,6 +123,13 @@ check('Base64 图片引用已移除', !externalized.markdown.includes('data:imag
 check('两个图片引用均保留', externalized.imageCount === 2)
 check('重复图片只保存一次', storedInlineImages === 1)
 check('两个引用复用同一路径', new Set([...externalized.markdown.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1])).size === 1)
+// 5) 超大内嵌图片：超过上限时跳过外置、保留原样并计数
+console.log('测试：超大内嵌图片跳过外置')
+const oversizedMd = '![big](data:image/png;base64,' + 'A'.repeat(2560) + ')'
+const oversized = await externalizeMarkdownDataImages(oversizedMd, async () => 'never.png', 512)
+check('超大图片跳过外置', oversized.imageCount === 0 && oversized.skippedImages === 1)
+check('跳过时保留原 data URI', oversized.markdown.includes('data:image/png;base64'))
+check('跳过时不调用存储', storedInlineImages === 1)
 
 console.log(`
 结果：${pass} 通过，${fail} 失败`)

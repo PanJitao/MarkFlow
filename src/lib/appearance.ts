@@ -15,7 +15,9 @@ export interface AppearanceSettings {
   statusbarBlurEnabled: boolean
   buttonTextColor: string
   editorColor: string
+  editorColorCustom: boolean
   previewColor: string
+  previewColorCustom: boolean
 }
 
 export interface StoredBackgroundAsset {
@@ -39,7 +41,9 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   statusbarBlurEnabled: true,
   buttonTextColor: '#555555',
   editorColor: '#1a1a1a',
+  editorColorCustom: false,
   previewColor: '#1a1a1a',
+  previewColorCustom: false,
 }
 
 const LEGACY_DEFAULT_COLORS = {
@@ -63,6 +67,10 @@ const loadColor = (value: unknown, legacy: Set<string>, fallback: string) => {
   if (!isColor(value) || legacy.has(value.toLowerCase())) return fallback
   return value
 }
+
+const colorWasCustomized = (value: unknown, legacy: Set<string>, defaultColor: string) => (
+  isColor(value) && !legacy.has(value.toLowerCase()) && value.toLowerCase() !== defaultColor.toLowerCase()
+)
 
 const clamp = (value: unknown, min: number, max: number, fallback: number) => {
   const number = typeof value === 'number' ? value : Number(value)
@@ -100,7 +108,13 @@ export function loadAppearanceSettings(): AppearanceSettings {
         : DEFAULT_APPEARANCE.statusbarBlurEnabled,
       buttonTextColor: loadColor(saved.buttonTextColor, LEGACY_DEFAULT_COLORS.buttonTextColor, DEFAULT_APPEARANCE.buttonTextColor),
       editorColor: loadColor(saved.editorColor, LEGACY_DEFAULT_COLORS.editorColor, DEFAULT_APPEARANCE.editorColor),
+      editorColorCustom: typeof saved.editorColorCustom === 'boolean'
+        ? saved.editorColorCustom
+        : colorWasCustomized(saved.editorColor, LEGACY_DEFAULT_COLORS.editorColor, DEFAULT_APPEARANCE.editorColor),
       previewColor: loadColor(saved.previewColor, LEGACY_DEFAULT_COLORS.previewColor, DEFAULT_APPEARANCE.previewColor),
+      previewColorCustom: typeof saved.previewColorCustom === 'boolean'
+        ? saved.previewColorCustom
+        : colorWasCustomized(saved.previewColor, LEGACY_DEFAULT_COLORS.previewColor, DEFAULT_APPEARANCE.previewColor),
     }
   } catch {
     return { ...DEFAULT_APPEARANCE }

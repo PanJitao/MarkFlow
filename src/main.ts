@@ -19,7 +19,8 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
-import { externalizeMarkdownDataImages, markdownToDocxBlob } from './lib/convert'
+import { externalizeMarkdownDataImages } from './lib/externalize-image'
+import { attachLogErrorHandlers, formatLogExport, log } from './lib/log'
 import {
   clearBackgroundAsset,
   DEFAULT_APPEARANCE,
@@ -35,6 +36,7 @@ import {
   pickFilePath,
   pickOpenFolder,
   pickSavePath,
+  fileSize,
   writeTextFile,
   writeExistingTextFile,
   writeBytesFile,
@@ -81,6 +83,11 @@ hljs.registerLanguage('powershell', powershell)
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('sql', sql)
 
+const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent) || navigator.platform.includes('Mac')
+const primaryModifierLabel = isMacOS ? 'Command' : 'Ctrl'
+const shortcutLabel = (key: string) => `${primaryModifierLabel}+${key}`
+document.documentElement.classList.toggle('platform-macos', isMacOS && isTauri())
+
 const SAMPLE = `# 欢迎使用 MarkFlow
 
 一个轻量桌面小工具，可以完成 **Markdown、Word、Excel、PowerPoint、PDF、HTML** 之间的互相转换。
@@ -98,7 +105,7 @@ const SAMPLE = `# 欢迎使用 MarkFlow
 2. 右边会立刻显示排版后的样子
 3. 想转换文件时，点顶部按钮选择文件即可
 
-> 提示：支持 **Ctrl+I** 斜体。
+> 提示：支持 **${shortcutLabel('I')}** 斜体。
 `
 
 const editor = document.querySelector<HTMLTextAreaElement>('#editor')!
@@ -127,6 +134,8 @@ const updateStatusEl = document.querySelector<HTMLElement>('#update-status')!
 const updateProgressEl = document.querySelector<HTMLProgressElement>('#update-progress')!
 const updateLaterBtn = document.querySelector<HTMLButtonElement>('#update-later-btn')!
 const updateConfirmBtn = document.querySelector<HTMLButtonElement>('#update-confirm-btn')!
+const updateCloseBtn = document.querySelector<HTMLButtonElement>('#update-close-btn')!
+const updateCheckStatusEl = document.querySelector<HTMLElement>('#update-check-status')
 const chooseBackgroundBtn = document.querySelector<HTMLButtonElement>('#choose-background-btn')!
 const clearBackgroundBtn = document.querySelector<HTMLButtonElement>('#clear-background-btn')!
 const backgroundFileInput = document.querySelector<HTMLInputElement>('#background-file-input')!
@@ -167,6 +176,8 @@ const editorContextMenu = document.querySelector<HTMLElement>('#editor-context-m
 const contextSubmenuTriggers = [...editorContextMenu.querySelectorAll<HTMLButtonElement>('[data-context-submenu]')]
 const fileTree = document.querySelector<HTMLElement>('#file-tree')!
 const fileTreeContextMenu = document.querySelector<HTMLElement>('#file-tree-context-menu')!
+const italicToolbarButton = document.querySelector<HTMLButtonElement>('[data-action="italic"]')!
+const revealInFileManagerLabel = document.querySelector<HTMLElement>('#reveal-in-file-manager-label')!
 const editorPanel = document.querySelector<HTMLElement>('.editor-panel')!
 const workspaceLabel = document.querySelector<HTMLElement>('#workspace-label')!
 const fileTreeToggleBtn = document.querySelector<HTMLButtonElement>('#file-tree-toggle-btn')!
@@ -174,6 +185,17 @@ const windowTitleEl = document.querySelector<HTMLElement>('#window-title')!
 const windowMinimizeBtn = document.querySelector<HTMLButtonElement>('#window-minimize-btn')!
 const windowMaximizeBtn = document.querySelector<HTMLButtonElement>('#window-maximize-btn')!
 const windowCloseBtn = document.querySelector<HTMLButtonElement>('#window-close-btn')!
+italicToolbarButton.title = `斜体 (${shortcutLabel('I')})`
+italicToolbarButton.setAttribute('aria-label', `斜体 (${shortcutLabel('I')})`)
+revealInFileManagerLabel.textContent = isMacOS ? '在 Finder 中打开' : '在文件管理器中打开'
+if (isMacOS) {
+  const setDefaultMenuBtn = document.querySelector<HTMLButtonElement>('#set-default-menu-btn')
+  if (setDefaultMenuBtn) setDefaultMenuBtn.textContent = '在 Finder 中设置默认 Markdown 打开方式'
+  const settingsMenuHint = document.querySelector<HTMLElement>('#settings-menu-hint')
+  if (settingsMenuHint) settingsMenuHint.textContent = 'macOS 通过 Finder 的“打开方式”选择 MarkFlow，无需注册。'
+  const macAssociationRow = document.querySelector<HTMLElement>('#mac-md-association-row')
+  if (macAssociationRow) macAssociationRow.hidden = false
+}
 const fileBtn = document.querySelector<HTMLButtonElement>('#file-btn')!
 const fileMenu = document.querySelector<HTMLElement>('#file-menu')!
 const recentFilesBtn = document.querySelector<HTMLButtonElement>('#recent-files-btn')!
@@ -284,18 +306,24 @@ function clearPersistedSession() {
   localStorage.removeItem(STATE_KEY)
 }
 
+/** 立即把当前编辑器内容 + 文件路径写入本地存储，下次打开可恢复 */
+function persistNow() {
+  try {
+    const state = currentFile && editor.value.length > LARGE_DOCUMENT_CHARS
+      ? { currentFile }
+      : { markdown: editor.value, currentFile }
+    localStorage.setItem(STATE_KEY, JSON.stringify(state))
+  } catch {
+    // 容量超限或隐私模式，忽略
+  }
+}
+
 /** 防抖保存当前编辑器内容 + 文件路径，下次打开可恢复 */
 function schedulePersist() {
   if (persistTimer) clearTimeout(persistTimer)
   persistTimer = setTimeout(() => {
-    try {
-      const state = currentFile && editor.value.length > LARGE_DOCUMENT_CHARS
-        ? { currentFile }
-        : { markdown: editor.value, currentFile }
-      localStorage.setItem(STATE_KEY, JSON.stringify(state))
-    } catch {
-      // 容量超限或隐私模式，忽略
-    }
+    persistTimer = null
+    persistNow()
   }, 400)
 }
 
@@ -480,6 +508,7 @@ function showUpdateProgress(event: DownloadEvent, state: { total: number; downlo
     state.total = event.data.contentLength || 0
     state.downloaded = 0
     updateProgressEl.value = 0
+    updateProgressEl.hidden = false
     updateStatusEl.textContent = '正在下载更新…'
     return
   }
@@ -493,11 +522,13 @@ function showUpdateProgress(event: DownloadEvent, state: { total: number; downlo
     return
   }
   updateProgressEl.value = 100
+  updateProgressEl.hidden = false
   updateStatusEl.textContent = '下载完成，正在安装…'
 }
 
 async function checkForUpdate(manual = false): Promise<boolean> {
   if (!isTauri()) {
+    if (updateCheckStatusEl) updateCheckStatusEl.textContent = '浏览器预览环境不可用'
     if (manual) {
       setStatus('当前运行在浏览器预览环境，无法检查桌面更新')
       showToast('桌面应用中才可以检查更新', 'warning')
@@ -506,6 +537,8 @@ async function checkForUpdate(manual = false): Promise<boolean> {
   }
   try {
     const update = await check({ timeout: 12_000 })
+    if (updateCheckStatusEl) updateCheckStatusEl.textContent = update ? '发现新版本 ' + update.version : '当前已是最新版本'
+    log('info', 'update', update ? `发现新版本 ${update.version}，当前版本 ${update.currentVersion}` : '当前已是最新版本')
     if (!update) {
       if (manual) {
         setStatus('当前已是最新版本')
@@ -518,6 +551,7 @@ async function checkForUpdate(manual = false): Promise<boolean> {
     updateVersionEl.textContent = `发现新版本 ${update.version}，当前版本 ${update.currentVersion}`
     updateStatusEl.textContent = update.body || '确认后将下载并安装更新。'
     updateProgressEl.value = 0
+    updateProgressEl.hidden = true
     setUpdateControls(false)
     if (!updateDialog.open) {
       window.getSelection()?.removeAllRanges()
@@ -527,6 +561,8 @@ async function checkForUpdate(manual = false): Promise<boolean> {
     return true
   } catch (err) {
     console.warn('检查更新失败', err)
+    log('error', 'update', `检查更新失败：${errMsg(err)}`)
+    if (updateCheckStatusEl) updateCheckStatusEl.textContent = '检查更新失败'
     if (manual) {
       setStatus(`检查更新失败：${errMsg(err)}`)
       showToast(`检查更新失败：${errMsg(err)}`, 'error')
@@ -536,6 +572,7 @@ async function checkForUpdate(manual = false): Promise<boolean> {
 }
 
 updateLaterBtn.addEventListener('click', () => updateDialog.close())
+updateCloseBtn.addEventListener('click', () => updateDialog.close())
 updateDialog.addEventListener('cancel', (event) => {
   if (updateInstalling) event.preventDefault()
 })
@@ -547,11 +584,13 @@ updateConfirmBtn.addEventListener('click', async () => {
   const download = { total: 0, downloaded: 0 }
   try {
     await availableUpdate.downloadAndInstall((event) => showUpdateProgress(event, download))
+    updateProgressEl.hidden = true
     updateStatusEl.textContent = '安装完成，正在重新启动…'
     await relaunch()
   } catch (err) {
     updateInstalling = false
     setUpdateControls(false)
+    updateProgressEl.hidden = true
     updateStatusEl.textContent = `更新失败：${errMsg(err)}`
     showToast(`更新失败：${errMsg(err)}`, 'error')
   }
@@ -613,9 +652,11 @@ function applyAppearance(settings: AppearanceSettings) {
   const defaultButtonText = darkTheme ? '#e5e5e5' : DEFAULT_APPEARANCE.buttonTextColor
   const defaultEditorText = darkTheme ? '#f2f2f2' : DEFAULT_APPEARANCE.editorColor
   const defaultPreviewText = darkTheme ? '#f2f2f2' : DEFAULT_APPEARANCE.previewColor
+  const editorText = settings.editorColorCustom ? settings.editorColor : defaultEditorText
+  const previewText = settings.previewColorCustom ? settings.previewColor : defaultPreviewText
   root.style.setProperty('--button-text', settings.buttonTextColor === DEFAULT_APPEARANCE.buttonTextColor ? defaultButtonText : settings.buttonTextColor)
-  root.style.setProperty('--editor-text', settings.editorColor === DEFAULT_APPEARANCE.editorColor ? defaultEditorText : settings.editorColor)
-  root.style.setProperty('--preview-text', settings.previewColor === DEFAULT_APPEARANCE.previewColor ? defaultPreviewText : settings.previewColor)
+  root.style.setProperty('--editor-text', editorText)
+  root.style.setProperty('--preview-text', previewText)
 
   backgroundColorInput.value = settings.backgroundColor
   backgroundOpacityInput.value = String(settings.backgroundOpacity)
@@ -639,8 +680,8 @@ function applyAppearance(settings: AppearanceSettings) {
   statusbarBlurToggle.setAttribute('aria-checked', String(settings.statusbarBlurEnabled))
   statusbarBlurValue.textContent = settings.statusbarBlurEnabled ? '开启' : '关闭'
   buttonTextColorInput.value = settings.buttonTextColor
-  editorColorInput.value = settings.editorColor
-  previewColorInput.value = settings.previewColor
+  editorColorInput.value = editorText
+  previewColorInput.value = previewText
 
   if (settings.backgroundOpacity === 0) backgroundVideo.pause()
   else if (customBackground.classList.contains('has-video') && !document.hidden) {
@@ -1760,7 +1801,7 @@ async function autoSaveCurrentFile(trigger: 'interval' | 'window-blur' | 'file-s
     return 'skipped'
   }
   setDocumentSaveState('saving')
-  const operation = (async (): Promise<'saved' | 'failed'> => {
+  const operation = (async (): Promise<'saved' | 'skipped' | 'failed'> => {
     try {
       await writeExistingTextFile(target, content)
       if (currentFile === target && markdown === content) lastSavedMarkdown = content
@@ -1808,8 +1849,14 @@ async function saveBeforeFileSwitch() {
 
 async function openMarkdownPath(path: string) {
   if (!await saveBeforeFileSwitch()) return
-  const text = await readTextFile(path)
-  await applyOpenedMarkdown(path, text)
+  try {
+    const text = await readTextFile(path)
+    log('info', 'open', `打开文件 ${path}（字符数 ${text.length}）`)
+    await applyOpenedMarkdown(path, text)
+  } catch (err) {
+    log('error', 'open', `打开文件失败 ${path}：${errMsg(err)}`)
+    throw err
+  }
 }
 
 async function applyOpenedMarkdown(path: string, text: string) {
@@ -1827,10 +1874,15 @@ async function applyOpenedMarkdown(path: string, text: string) {
   updateDocumentSaveState()
   await renderWorkspaceTree()
   if (prepared.externalized) {
-    setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 Ctrl+S 保存轻量 Markdown`)
+    setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 ${shortcutLabel('S')} 保存轻量 Markdown`)
     showToast(`已提取 ${prepared.imageCount} 张内嵌图片，请保存 Markdown`, 'warning')
   } else {
     setStatus(`已打开 ${path}`)
+  }
+  if (prepared.skippedImages > 0) {
+    log('warn', 'open', `跳过 ${prepared.skippedImages} 张超过 20 MiB 的内嵌图片：${path}`)
+    setStatus(`已打开 ${path}（跳过 ${prepared.skippedImages} 张超大内嵌图片）`)
+    showToast(`已跳过 ${prepared.skippedImages} 张超过 20 MiB 的内嵌图片`, 'warning')
   }
 }
 
@@ -1880,7 +1932,7 @@ function extensionForImageType(contentType: string) {
 
 async function prepareMarkdownForOpen(path: string, source: string) {
   if (!source.includes('data:image/')) {
-    return { markdown: source, externalized: false, imageCount: 0 }
+    return { markdown: source, externalized: false, imageCount: 0, skippedImages: 0 }
   }
   const directory = await documentImageStorageDirectory(path)
   const result = await externalizeMarkdownDataImages(source, async (image) => {
@@ -1888,18 +1940,18 @@ async function prepareMarkdownForOpen(path: string, source: string) {
     const stored = await saveImageAsset(directory, fileName, image.bytes, false)
     return markdownImagePath(await imageReferenceForDocument(path, stored.path))
   })
-  return { markdown: result.markdown, externalized: result.imageCount > 0, imageCount: result.imageCount }
+  return {
+    markdown: result.markdown,
+    externalized: result.imageCount > 0,
+    imageCount: result.imageCount,
+    skippedImages: result.skippedImages,
+  }
 }
 
 async function openWorkspaceFolder() {
   const folder = await pickOpenFolder()
   if (!folder) return
   workspaceRoot = folder
-  try {
-    await ensureWorkspaceImageDir(folder)
-  } catch (error) {
-    showToast(`无法创建工作区 img 文件夹：${errMsg(error)}`, 'error')
-  }
   rememberRecentFolder(folder)
   expandedTreeDirectories.clear()
   expandedTreeDirectories.add(folder)
@@ -1949,9 +2001,17 @@ async function appendTreeEntries(container: DocumentFragment | HTMLElement, fold
     }
     row.title = entry.path
 
+    const isExpanded = entry.is_dir && expandedTreeDirectories.has(entry.path)
+    if (entry.is_dir) row.setAttribute('aria-expanded', String(isExpanded))
     const icon = document.createElement('span')
     icon.className = 'file-tree-icon'
-    icon.textContent = entry.is_dir ? (expandedTreeDirectories.has(entry.path) ? '▾' : '▸') : isImagePath(entry.path) ? '▧' : '·'
+    if (entry.is_dir) {
+      icon.classList.add('file-tree-chevron')
+      icon.classList.toggle('expanded', isExpanded)
+      icon.setAttribute('aria-hidden', 'true')
+    } else {
+      icon.textContent = isImagePath(entry.path) ? '▧' : '·'
+    }
     const label = document.createElement('span')
     label.className = 'file-tree-name'
     label.textContent = entry.name
@@ -2031,21 +2091,44 @@ async function importImagePaths(paths: string[]) {
     showToast('拖入的内容中没有支持的图片', 'warning')
     return
   }
+  let workspaceImgNewlyCreated = false
+  if (workspaceRoot) {
+    workspaceImgNewlyCreated = !(await pathExists(joinedPath(workspaceRoot, 'img')))
+  }
   const retry = () => importImagePaths(images)
   const directory = await imageStorageDirectory(retry)
   if (!directory) return
   const stored: string[] = []
+  let skippedOversize = 0
   for (const source of images) {
     const fileName = fileNameFromPath(source)
+    try {
+      const size = await fileSize(source)
+      if (size > MAX_IMAGE_BYTES) {
+        skippedOversize += 1
+        log('warn', 'image', `跳过超大图片 ${fileName}（${Math.round(size / 1024 / 1024)} MiB）`)
+        continue
+      }
+    } catch (error) {
+      skippedOversize += 1
+      log('warn', 'image', `无法读取图片信息，跳过 ${fileName}：${errMsg(error)}`)
+      continue
+    }
     const path = await resolveAssetCollision(
       (overwrite) => copyImageAsset(source, directory, overwrite),
       fileName,
     )
     if (path) stored.push(path)
   }
+  if (workspaceImgNewlyCreated && stored.length) {
+    showToast('已为当前文件夹创建 img 图片目录', 'success')
+  }
   await insertImagePaths(stored)
   if (workspaceRoot) await renderWorkspaceTree()
-  if (stored.length) showToast(`已导入 ${stored.length} 张图片`, 'success')
+  if (skippedOversize > 0) {
+    showToast(`已跳过 ${skippedOversize} 张超过 20 MiB 或无法读取的图片`, 'warning')
+  }
+  if (stored.length) showToast('已导入 ' + stored.length + ' 张图片', 'success')
 }
 
 function fallbackClipboardImageName(file: File) {
@@ -2179,6 +2262,7 @@ async function saveMarkdownAs() {
     showToast('已另存为', 'success')
   } catch (err) {
     setDocumentSaveState('error')
+    setStatus(`另存失败：${errMsg(err)}`)
     showToast(`另存失败：${errMsg(err)}`, 'error')
   }
 }
@@ -2230,8 +2314,10 @@ async function convertOfficeToMarkdown(kind: ConvertImportKind) {
 
   const target = await pickSavePath(swapExtension(picked, '.md'), [{ name: 'Markdown', extensions: ['md'] }])
   if (!target) return
+  if (!await saveBeforeFileSwitch()) return
 
   setBusy(true, `正在转换《${fileName}》…`)
+  log('info', 'convert', `开始转换《${fileName}》（${kind}）`)
   try {
     // 可能带内嵌图片的格式，把图片外置到图片资源目录；目录未配置时降级为纯文字
     let imageDirectory: string | null = null
@@ -2256,6 +2342,7 @@ async function convertOfficeToMarkdown(kind: ConvertImportKind) {
     const imageNote = converted.imageCount > 0 ? `，提取 ${converted.imageCount} 张图片` : ''
     setStatus(`已把《${fileName}》转换成 Markdown（${converted.format}，共 ${charCount} 字符${imageNote}）`)
     showToast(`已把《${fileName}》转成 Markdown${imageNote}`, 'success')
+    log('info', 'convert', `转换完成《${fileName}》：${converted.format}，${charCount} 字符，图片 ${converted.imageCount} 张，跳过 ${converted.skippedImages} 张`)
     if (converted.skippedImages > 0) {
       showToast(`文档中有 ${converted.skippedImages} 张图片无法提取，已保留为文字说明`, 'warning')
     }
@@ -2264,6 +2351,7 @@ async function convertOfficeToMarkdown(kind: ConvertImportKind) {
     const message = failure ? convertFailureMessage(failure, kind) : errMsg(err)
     setStatus(`转换失败：${message}`)
     showToast(message, 'error')
+    log('error', 'convert', `转换失败《${fileName}》：${failure ? failure.code + ' ' + failure.message : errMsg(err)}`)
   } finally {
     setBusy(false)
   }
@@ -2276,11 +2364,13 @@ async function exportHtml() {
     'text',
   )
   if (!picked) return
+  if (!await saveBeforeFileSwitch()) return
   const target = await pickSavePath(swapExtension(picked.filePath, '.html'), [
     { name: 'HTML', extensions: ['html'] },
   ])
   if (!target) return
   setBusy(true, '正在导出 HTML…')
+  log('info', 'export', `开始导出 HTML：${picked.filePath}`)
   try {
     const html = await buildPortableHtml(picked.text, picked.filePath)
     await writeTextFile(target, html)
@@ -2290,9 +2380,11 @@ async function exportHtml() {
     updateDocumentSaveState()
     setStatus(`已导出 HTML 到 ${target}`)
     showToast('已导出 HTML', 'success')
+    log('info', 'export', `已导出 HTML 到 ${target}`)
   } catch (err) {
     setStatus(`导出失败：${errMsg(err)}`)
     showToast(`导出失败：${errMsg(err)}`, 'error')
+    log('error', 'export', `导出 HTML 失败：${errMsg(err)}`)
   } finally {
     setBusy(false)
   }
@@ -2357,12 +2449,18 @@ async function exportDocx() {
     'text',
   )
   if (!picked) return
+  if (!await saveBeforeFileSwitch()) return
   const target = await pickSavePath(swapExtension(picked.filePath, '.docx'), [
     { name: 'Word', extensions: ['docx'] },
   ])
   if (!target) return
   setBusy(true, '正在导出 Word…')
+  if (/!\[[^\]]*\]\(/i.test(picked.text)) {
+    showToast('文档包含图片，导出 Word 将显示占位文本（暂不支持嵌入图片）', 'warning')
+  }
+  log('info', 'export', `开始导出 Word：${picked.filePath}`)
   try {
+    const { markdownToDocxBlob } = await import('./lib/convert')
     const blob = await markdownToDocxBlob(picked.text)
     const bytes = new Uint8Array(await blob.arrayBuffer())
     await writeBytesFile(target, bytes)
@@ -2372,9 +2470,11 @@ async function exportDocx() {
     updateDocumentSaveState()
     setStatus(`已导出 Word 到 ${target}`)
     showToast('已导出 Word', 'success')
+    log('info', 'export', `已导出 Word 到 ${target}`)
   } catch (err) {
     setStatus(`导出失败：${errMsg(err)}`)
     showToast(`导出失败：${errMsg(err)}`, 'error')
+    log('error', 'export', `导出 Word 失败：${errMsg(err)}`)
   } finally {
     setBusy(false)
   }
@@ -2395,6 +2495,29 @@ windowMaximizeBtn.addEventListener('click', () => {
 windowCloseBtn.addEventListener('click', () => {
   if (isTauri()) void getCurrentWindow().close().catch(() => undefined)
 })
+
+// 关闭前拦截：先等自动保存与会话持久化落地，再真正销毁窗口，避免 WebView 销毁中断写入
+if (isTauri()) {
+  void getCurrentWindow().onCloseRequested(async (event) => {
+    event.preventDefault()
+    try {
+      await autoSaveCurrentFile('window-blur')
+      if (persistTimer) {
+        clearTimeout(persistTimer)
+        persistTimer = null
+      }
+      persistNow()
+    } catch {
+      // 保存失败不阻止关闭；状态栏与 toast 已给出失败提示
+    } finally {
+      try {
+        await getCurrentWindow().destroy()
+      } catch {
+        // 窗口可能已被系统直接关闭，忽略
+      }
+    }
+  })
+}
 
 document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((btn) => {
   btn.addEventListener('click', () => handleToolbar(btn.dataset.action!))
@@ -2799,11 +2922,6 @@ async function openRecentFolder(path: string) {
   try {
     await readDirectory(path)
     workspaceRoot = path
-    try {
-      await ensureWorkspaceImageDir(path)
-    } catch (error) {
-      showToast(`无法创建工作区 img 文件夹：${errMsg(error)}`, 'error')
-    }
     expandedTreeDirectories.clear()
     expandedTreeDirectories.add(path)
     await renderWorkspaceTree()
@@ -2916,6 +3034,24 @@ themeModeButtons.forEach((button) => {
 })
 checkUpdatesBtn?.addEventListener('click', () => void checkForUpdate(true))
 
+const exportLogsBtn = document.querySelector<HTMLButtonElement>('#export-logs-btn')
+
+async function exportSessionLogs() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const target = await pickSavePath(`markflow-logs-${stamp}.txt`, [{ name: '文本日志', extensions: ['txt'] }])
+  if (!target) return
+  try {
+    await writeTextFile(target, formatLogExport())
+    log('info', 'log', `已导出日志到 ${target}`)
+    showToast('日志已导出', 'success')
+  } catch (err) {
+    log('error', 'log', `导出日志失败：${errMsg(err)}`)
+    showToast(`导出日志失败：${errMsg(err)}`, 'error')
+  }
+}
+
+exportLogsBtn?.addEventListener('click', () => void exportSessionLogs())
+
 appearanceDialog.addEventListener('click', (e) => {
   if (e.target === appearanceDialog) appearanceDialog.close()
 })
@@ -2959,10 +3095,10 @@ buttonTextColorInput.addEventListener('input', () => {
   updateAppearance({ buttonTextColor: buttonTextColorInput.value })
 })
 editorColorInput.addEventListener('input', () => {
-  updateAppearance({ editorColor: editorColorInput.value })
+  updateAppearance({ editorColor: editorColorInput.value, editorColorCustom: true })
 })
 previewColorInput.addEventListener('input', () => {
-  updateAppearance({ previewColor: previewColorInput.value })
+  updateAppearance({ previewColor: previewColorInput.value, previewColorCustom: true })
 })
 
 chooseBackgroundBtn.addEventListener('click', () => backgroundFileInput.click())
@@ -3142,14 +3278,23 @@ document.querySelectorAll<HTMLButtonElement>('[data-setting]').forEach((btn) => 
     setBusy(true)
     try {
       if (action === 'open-with') {
+        if (isMacOS) {
+          showToast('macOS 无需注册，请在 Finder 中选择打开方式', 'warning')
+          return
+        }
         await registerMdHandler()
         showToast('已启用 Markdown 打开方式与新建菜单', 'success')
         setStatus('已注册 .md 打开方式和「新建」菜单')
       } else if (action === 'default-app') {
-        await registerMdHandler()
+        if (!isMacOS) await registerMdHandler()
         await openDefaultAppsSettings()
-        showToast('已打开系统设置，请在 .md 中选择 MarkFlow', 'warning')
-        setStatus('请在系统「默认应用」里把 .md 设为 MarkFlow')
+        if (isMacOS) {
+          showToast('已打开系统设置，请在 Finder 里选择 MarkFlow 打开 .md', 'warning')
+          setStatus('请在 Finder 中用“打开方式”选择 MarkFlow')
+        } else {
+          showToast('已打开系统设置，请在 .md 中选择 MarkFlow', 'warning')
+          setStatus('请在系统「默认应用」里把 .md 设为 MarkFlow')
+        }
       }
     } catch (err) {
       showToast(`操作失败：${errMsg(err)}`, 'error')
@@ -3566,26 +3711,33 @@ async function setupImageDrop() {
 // ---------- 启动初始化 ----------
 
 async function init() {
+  attachLogErrorHandlers()
+  log('info', 'app', isTauri() ? 'MarkFlow 桌面端启动' : 'MarkFlow 浏览器预览环境')
   try {
     const launchFile = await getLaunchFile()
     if (launchFile) {
       const text = await readTextFile(launchFile)
       const prepared = await prepareMarkdownForOpen(launchFile, text)
+      log('info', 'open', `打开启动文件 ${launchFile}（字符数 ${text.length}）`)
       setCurrentFile(launchFile)
       setMarkdown(prepared.markdown)
       lastSavedMarkdown = prepared.externalized ? null : prepared.markdown
       updateDocumentSaveState()
       await renderWorkspaceTree()
       if (prepared.externalized) {
-        setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 Ctrl+S 保存轻量 Markdown`)
+        setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 ${shortcutLabel('S')} 保存轻量 Markdown`)
         showToast(`已提取 ${prepared.imageCount} 张内嵌图片，请保存 Markdown`, 'warning')
       } else {
         setStatus(`已打开 ${currentFile}`)
+      }
+      if (prepared.skippedImages > 0) {
+        log('warn', 'open', `跳过 ${prepared.skippedImages} 张超过 20 MiB 的内嵌图片：${launchFile}`)
       }
       return
     }
   } catch (err) {
     setStatus(`打开传入文件失败：${errMsg(err)}`)
+    log('error', 'open', `打开启动文件失败：${errMsg(err)}`)
   }
   await restoreSession()
   await renderWorkspaceTree()

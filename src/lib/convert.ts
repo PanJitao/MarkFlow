@@ -1,5 +1,5 @@
 // 文档格式互转：办公文档导入（Word/Excel/PPT/PDF 等 → Markdown）由 Rust 端 anydoc 引擎完成，
-// 这里保留 Markdown 端的能力：Base64 图片外置化 与 Markdown → Word 导出。
+// 这里保留 Markdown 端的能力：Markdown → Word 导出（Base64 图片外置化见 externalize-image.ts）。
 import MarkdownIt from 'markdown-it'
 import { recoverBrokenBold } from './markdown.ts'
 import {
@@ -21,55 +21,13 @@ import {
 // 开启 html 以解析加粗闭合恢复产生的 <strong>/<em> 标签（见 inlineTokensToRuns 的处理）
 const inlineMd = new MarkdownIt({ html: true })
 
-async function bytesHash(bytes: Uint8Array) {
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
-}
-
-
-
-export type InlineMarkdownImage = {
-  contentType: string
-  bytes: Uint8Array
-  number: number
-  hash: string
-}
-
-/** 把旧 Markdown 的 Base64 图片替换成外部引用；相同图片只写一次。 */
-export async function externalizeMarkdownDataImages(
-  source: string,
-  storeImage: (image: InlineMarkdownImage) => Promise<string>,
-): Promise<{ markdown: string; imageCount: number }> {
-  const pattern = /!\[([^\]]*)\]\((?:<)?data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)(?:>)?\)/gi
-  const parts: string[] = []
-  const storedByHash = new Map<string, string>()
-  let previousEnd = 0
-  let imageCount = 0
-  let match: RegExpExecArray | null
-
-  while ((match = pattern.exec(source)) !== null) {
-    imageCount += 1
-    parts.push(source.slice(previousEnd, match.index))
-    const bytes = Uint8Array.from(atob(match[3]), (character) => character.charCodeAt(0))
-    const hash = await bytesHash(bytes)
-    let reference = storedByHash.get(hash)
-    if (!reference) {
-      reference = await storeImage({ contentType: match[2], bytes, number: storedByHash.size + 1, hash })
-      storedByHash.set(hash, reference)
-    }
-    parts.push(`![${match[1]}](${reference})`)
-    previousEnd = pattern.lastIndex
-  }
-
-  if (!imageCount) return { markdown: source, imageCount: 0 }
-  parts.push(source.slice(previousEnd))
-  return { markdown: parts.join(''), imageCount }
-}
 
 export async function markdownToDocxBlob(markdown: string): Promise<Blob> {
   const children: any[] = []
   const lines = markdown.split(/\r?\n/)
   let i = 0
+  // 每个独立的有序列表块使用不同的 numbering instance，保证编号从 1 重新开始
+  let orderedListInstance = 0
 
   while (i < lines.length) {
     const line = lines[i].replace(/\s+$/g, '')
@@ -147,12 +105,13 @@ export async function markdownToDocxBlob(markdown: string): Promise<Blob> {
 
     // 有序列表：1. / 2.
     if (/^\d+[.)]\s+/.test(stripped)) {
+      orderedListInstance += 1
       while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
         const text = lines[i].replace(/^\s*\d+[.)]\s+/, '')
         children.push(
           new Paragraph({
             children: parseInlineRuns(text),
-            numbering: { reference: 'ordered-list', level: 0 },
+            numbering: { reference: 'ordered-list', level: 0, instance: orderedListInstance },
           }),
         )
         i += 1

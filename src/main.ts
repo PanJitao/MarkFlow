@@ -2498,8 +2498,11 @@ windowCloseBtn.addEventListener('click', () => {
 
 // 关闭前拦截：先等自动保存与会话持久化落地，再真正销毁窗口，避免 WebView 销毁中断写入
 if (isTauri()) {
+  let closing = false
   void getCurrentWindow().onCloseRequested(async (event) => {
+    if (closing) return // 放行我们自己发起的关闭（destroy 兜底后的二次 close）
     event.preventDefault()
+    closing = true
     try {
       await autoSaveCurrentFile('window-blur')
       if (persistTimer) {
@@ -2509,11 +2512,15 @@ if (isTauri()) {
       persistNow()
     } catch {
       // 保存失败不阻止关闭；状态栏与 toast 已给出失败提示
-    } finally {
+    }
+    try {
+      await getCurrentWindow().destroy()
+    } catch {
+      // destroy 失败（如权限被拒）时回退为普通 close，由上方 closing 标记直接放行
       try {
-        await getCurrentWindow().destroy()
+        await getCurrentWindow().close()
       } catch {
-        // 窗口可能已被系统直接关闭，忽略
+        // 关闭彻底失败时不再拦截，避免窗口卡死
       }
     }
   })

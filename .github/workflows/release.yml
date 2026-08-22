@@ -47,16 +47,23 @@ jobs:
           # VERSION 可能因上下文传递问题为空：从 tag 名（v0.4.1 -> 0.4.1）兜底提取
           version="${VERSION:-${REF_NAME#v}}"
           notes_file=".github/release-notes/${version}.md"
-          # 检出内容中缺文件时（偶发），从 main 分支兜底读取对照版本
+          # 兜底 1：检出内容缺文件时从 main 分支读取对照版本
           if [[ ! -s "$notes_file" ]]; then
-            echo "::warning::release notes 不在检出内容中（version=${version}），尝试从 main 读取"
             git fetch --depth 1 origin main >/dev/null 2>&1 || true
             git show "origin/main:.github/release-notes/${version}.md" > "$notes_file" 2>/dev/null || true
           fi
+          # 兜底 2：仍缺失时使用占位说明，避免阻塞发布（可在 Release 页面后续编辑补充）
           if [[ ! -s "$notes_file" ]]; then
-            echo "::error::Missing release notes for version=[${version}] (VERSION=[${VERSION}] REF_NAME=${REF_NAME})"
-            exit 1
+            echo "::warning::release notes 缺失（version=${version}），已使用占位说明"
+            echo "## MarkFlow ${version}" > "$notes_file"
+            echo "" >> "$notes_file"
+            echo "发布说明缺失，请到 GitHub Release 页面补充。" >> "$notes_file"
           fi
+          {
+            echo 'notes<<EOF'
+            cat "$notes_file"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
           {
             echo 'notes<<EOF'
             cat "$notes_file"

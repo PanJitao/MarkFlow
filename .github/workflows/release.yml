@@ -42,12 +42,19 @@ jobs:
       - id: release_notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          notes_file=".github/release-notes/${VERSION}.md"
-          echo "DEBUG VERSION=[${VERSION}] checkout=$(git rev-parse --short HEAD) notes_file=${notes_file}"
-          ls -la .github/release-notes/ || true
+          # VERSION 可能因上下文传递问题为空：从 tag 名（v0.4.1 -> 0.4.1）兜底提取
+          version="${VERSION:-${REF_NAME#v}}"
+          notes_file=".github/release-notes/${version}.md"
+          # 检出内容中缺文件时（偶发），从 main 分支兜底读取对照版本
           if [[ ! -s "$notes_file" ]]; then
-            echo "::error file=release.yml::Missing release notes: VERSION=[${VERSION}] notes_file=${notes_file}"
+            echo "::warning::release notes 不在检出内容中（version=${version}），尝试从 main 读取"
+            git fetch --depth 1 origin main >/dev/null 2>&1 || true
+            git show "origin/main:.github/release-notes/${version}.md" > "$notes_file" 2>/dev/null || true
+          fi
+          if [[ ! -s "$notes_file" ]]; then
+            echo "::error::Missing release notes for version=[${version}] (VERSION=[${VERSION}] REF_NAME=${REF_NAME})"
             exit 1
           fi
           {

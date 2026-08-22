@@ -58,7 +58,14 @@ jobs:
       - name: 安装 Linux 系统依赖（Tauri 编译所需）
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev
 
       - name: 安装前端依赖
         run: npm ci
@@ -70,7 +77,9 @@ jobs:
         run: node scripts/smoke-convert.mjs
 
       - name: Rust 单元测试
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml 2>&1 \
+            || { echo "::error::cargo test 失败，请展开日志查看编译错误"; exit 1; }
 
   publish:
     needs: [release_metadata, quality_gate]

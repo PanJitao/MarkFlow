@@ -43,6 +43,8 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          echo "DEBUG VERSION=[${VERSION}] checkout=$(git rev-parse --short HEAD)"
+          ls -la .github/release-notes/ || true
           notes_file=".github/release-notes/${VERSION}.md"
           if [[ ! -s "$notes_file" ]]; then
             echo "Missing release notes: $notes_file"

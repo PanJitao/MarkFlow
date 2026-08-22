@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag, for example v0.3.9'
+        description: 'Release tag, for example v0.4.1'
         required: true
         type: string
 
@@ -22,7 +22,6 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
-      notes: ${{ steps.release_notes.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,37 +32,11 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tag must use vX.Y.Z, for example v0.3.9."
+            echo "Release tag must use vX.Y.Z, for example v0.4.1."
             exit 1
           fi
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - id: release_notes
-        run: |
-          # 发布版本直接来自 tag 名（GitHub 自动注入的环境变量，不依赖任何表达式求值）
-          version="${GITHUB_REF_NAME#v}"
-          notes_file=".github/release-notes/${version}.md"
-          if [[ ! -s "$notes_file" ]]; then
-            git fetch --depth 1 origin main >/dev/null 2>&1 || true
-            git show "origin/main:.github/release-notes/${version}.md" > "$notes_file" 2>/dev/null || true
-          fi
-          if [[ ! -s "$notes_file" ]]; then
-            echo "::warning::release notes 缺失 version=${version}，使用占位说明"
-            echo "# MarkFlow ${version}" > "$notes_file"
-            echo "" >> "$notes_file"
-            echo "发布说明缺失，请到 GitHub Release 页面补充。" >> "$notes_file"
-          fi
-          {
-            echo 'notes<<EOF'
-            cat "$notes_file"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-          {
-            echo 'notes<<EOF'
-            cat "$notes_file"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
 
   quality_gate:
     name: quality gate (typecheck + smoke + rust tests)
@@ -140,7 +113,7 @@ jobs:
         with:
           tagName: ${{ needs.release_metadata.outputs.tag }}
           releaseName: ${{ needs.release_metadata.outputs.version }}
-          releaseBody: ${{ needs.release_metadata.outputs.notes }}
+          releaseBody: MarkFlow ${{ needs.release_metadata.outputs.version }}（详细说明见仓库 README）
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} ${{ matrix.args }}

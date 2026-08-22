@@ -64,6 +64,9 @@ jobs:
             cat "$notes_file"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
+
+      - name: sanity probe
+        run: echo "HELLO_SANITY_PROBE_OK"
           {
             echo 'notes<<EOF'
             cat "$notes_file"

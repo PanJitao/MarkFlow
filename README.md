@@ -8,7 +8,7 @@
 
 Markdown、Word、Excel、HTML、PDF 的转换、编辑、预览和文件夹管理都在一个桌面应用中完成。
 
-[![Version](https://img.shields.io/badge/version-0.3.26-1f7a8c.svg)](https://github.com/PanJitao/MarkFlow/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.4.1-1f7a8c.svg)](https://github.com/PanJitao/MarkFlow/releases/latest)
 ![Tauri](https://img.shields.io/badge/desktop-Tauri%20v2-24c8db.svg)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3a6ea5.svg)
 [![License](https://img.shields.io/badge/license-MIT-4c956c.svg)](LICENSE)
@@ -23,21 +23,21 @@ Markdown、Word、Excel、HTML、PDF 的转换、编辑、预览和文件夹管�
 
 MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown 源码编辑与实时预览，支持 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word、HTML 或 PDF。打开文件夹后，可在左侧文件树中浏览 Markdown 和图片资源。
 
-当前源码版本为 `0.3.26`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
+当前源码版本为 `0.4.1`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
 
 ## 截图
 
 ### 文件夹工作区与实时预览
 
-![MarkFlow 0.3.26 主界面](docs/screenshots/markflow-0.3.25-main.png)
+![MarkFlow 0.4.1 主界面](docs/screenshots/markflow-0.3.25-main.png)
 
 ### 设置概览
 
-![MarkFlow 0.3.26 设置概览](docs/screenshots/markflow-0.3.25-settings.png)
+![MarkFlow 0.4.1 设置概览](docs/screenshots/markflow-0.3.25-settings.png)
 
 ### 转换菜单
 
-![MarkFlow 0.3.26 转换菜单](docs/screenshots/markflow-0.3.25-convert.png)
+![MarkFlow 0.4.1 转换菜单](docs/screenshots/markflow-0.3.25-convert.png)
 
 ## 核心功能
 
@@ -175,7 +175,7 @@ npm run tauri -- build --bundles nsis
 Windows NSIS 安装程序输出至：
 
 ```text
-src-tauri/target/release/bundle/nsis/MarkFlow_0.3.26_x64-setup.exe
+src-tauri/target/release/bundle/nsis/MarkFlow_0.4.1_x64-setup.exe
 ```
 
 ## 项目结构

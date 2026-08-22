@@ -28,13 +28,13 @@ Create `latest.json` from the generated NSIS installer signature, then upload it
 
 ```json
 {
-  "version": "0.3.26",
+  "version": "0.4.1",
   "notes": "Release notes",
   "pub_date": "2026-08-21T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "CONTENTS_OF_THE_NSIS_SIG_FILE",
-      "url": "https://github.com/PanJitao/MarkFlow/releases/download/v0.3.26/MarkFlow_0.3.26_x64-setup.exe"
+      "url": "https://github.com/PanJitao/MarkFlow/releases/download/v0.4.1/MarkFlow_0.4.1_x64-setup.exe"
     }
   }
 }
@@ -42,8 +42,8 @@ Create `latest.json` from the generated NSIS installer signature, then upload it
 
 For the next release, keep all identifiers aligned:
 
-- Git tag: `v0.3.26`
-- Application version: `0.3.26`
-- Release title: `0.3.26`
+- Git tag: `v0.4.1`
+- Application version: `0.4.1`
+- Release title: `0.4.1`
 
 `latest.json` is fetched from GitHub's `releases/latest/download` URL, so mark the new release as the latest release and do not mark it as a prerelease.

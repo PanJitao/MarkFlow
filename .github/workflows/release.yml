@@ -40,22 +40,17 @@ jobs:
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - id: release_notes
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
-          # VERSION 可能因上下文传递问题为空：从 tag 名（v0.4.1 -> 0.4.1）兜底提取
-          version="${VERSION:-${REF_NAME#v}}"
+          # 发布版本直接来自 tag 名（GitHub 自动注入的环境变量，不依赖任何表达式求值）
+          version="${GITHUB_REF_NAME#v}"
           notes_file=".github/release-notes/${version}.md"
-          # 兜底 1：检出内容缺文件时从 main 分支读取对照版本
           if [[ ! -s "$notes_file" ]]; then
             git fetch --depth 1 origin main >/dev/null 2>&1 || true
             git show "origin/main:.github/release-notes/${version}.md" > "$notes_file" 2>/dev/null || true
           fi
-          # 兜底 2：仍缺失时使用占位说明，避免阻塞发布（可在 Release 页面后续编辑补充）
           if [[ ! -s "$notes_file" ]]; then
-            echo "::warning::release notes 缺失（version=${version}），已使用占位说明"
-            echo "## MarkFlow ${version}" > "$notes_file"
+            echo "::warning::release notes 缺失 version=${version}，使用占位说明"
+            echo "# MarkFlow ${version}" > "$notes_file"
             echo "" >> "$notes_file"
             echo "发布说明缺失，请到 GitHub Release 页面补充。" >> "$notes_file"
           fi
@@ -64,9 +59,6 @@ jobs:
             cat "$notes_file"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
-
-      - name: sanity probe
-        run: echo "HELLO_SANITY_PROBE_OK"
           {
             echo 'notes<<EOF'
             cat "$notes_file"

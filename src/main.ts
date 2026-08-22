@@ -229,7 +229,6 @@ const expandedTreeDirectories = new Set<string>()
 let busy = false
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null
 let autoSaveInFlight: Promise<'saved' | 'skipped' | 'failed'> | null = null
-let saveInFlight: Promise<void> | null = null
 let autoSaveErrorShown = false
 let writingPreviewTable = false
 let renderedEditorLineCount = 0
@@ -240,6 +239,7 @@ let pendingPreviewRenderLine: number | null = null
 let previewRenderSyncSuppressed = false
 let previewScrollAnchors: Array<{ line: number; top: number }> = []
 const undoStack: Array<{ value: string; start: number; end: number }> = []
+const redoStack: Array<{ value: string; start: number; end: number }> = []
 const MAX_UNDO_STEPS = 100
 
 const APP_WINDOW_TITLE = 'MarkFlow 文档转换工作台'
@@ -248,8 +248,18 @@ const STANDALONE_IMAGE_DIR_KEY = 'markflow:standaloneImageDir'
 const MAX_RECENT_FOLDERS = 10
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const LARGE_DOCUMENT_CHARS = 1_000_000
+// 预览从「每键同步渲染」切换到「防抖渲染」的字符数阈值
+const PREVIEW_DEBOUNCE_CHARS = 50_000
+// 超过该阈值后，预览跳过表格可编辑增强与代码块高亮（纯静态渲染，避免大文档卡死）
+const PREVIEW_STATIC_CHARS = 200_000
+// 滚动锚点最多收集的去重元素数，避免大文档全量 getBoundingClientRect 强制布局
+const PREVIEW_ANCHOR_MAX_ELEMENTS = 3_000
+// 行号超过该行数启用虚拟化（只渲染可视窗口内的行号，DOM 节点数与行数解耦）
+const VIRTUAL_LINE_MIN = 5_000
+const VIRTUAL_LINE_OVERSCAN = 20
 const LARGE_PREVIEW_DELAY_MS = 350
 let largePreviewTimer: ReturnType<typeof setTimeout> | null = null
+let virtualLineRange: { start: number; end: number; lineCount: number } | null = null
 
 function fileNameFromPath(path: string) {
   const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
@@ -308,13 +318,18 @@ function clearPersistedSession() {
 
 /** 立即把当前编辑器内容 + 文件路径写入本地存储，下次打开可恢复 */
 function persistNow() {
+  const state = currentFile && editor.value.length > LARGE_DOCUMENT_CHARS
+    ? { currentFile }
+    : { markdown: editor.value, currentFile }
   try {
-    const state = currentFile && editor.value.length > LARGE_DOCUMENT_CHARS
-      ? { currentFile }
-      : { markdown: editor.value, currentFile }
     localStorage.setItem(STATE_KEY, JSON.stringify(state))
   } catch {
-    // 容量超限或隐私模式，忽略
+    // 容量超限或隐私模式：退化为仅保存文件路径，尽量保住「上次打开的文件」
+    try {
+      if (currentFile) localStorage.setItem(STATE_KEY, JSON.stringify({ currentFile }))
+    } catch {
+      // 完全无法写入时忽略（会话恢复将回落到示例文档）
+    }
   }
 }
 
@@ -404,6 +419,17 @@ function updateAutoSaveStrategyStatus(settings = appearanceSettings) {
 }
 
 /** 更新字数统计（汉字按字、英文按词综合估算） */
+let wordCountFrame: number | null = null
+
+/** 字数统计按帧节流：输入事件一帧可能触发多次，一帧最多统计一次 */
+function scheduleCountUpdate() {
+  if (wordCountFrame !== null) return
+  wordCountFrame = requestAnimationFrame(() => {
+    wordCountFrame = null
+    updateCount()
+  })
+}
+
 function updateCount() {
   const text = editor.value.length > LARGE_DOCUMENT_CHARS
     ? editor.value.replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, '').trim()
@@ -809,6 +835,16 @@ function markdownLineCount(value = editor.value) {
 
 function renderEditorLineNumbers(value = editor.value) {
   const lineCount = markdownLineCount(value)
+  if (lineCount >= VIRTUAL_LINE_MIN) {
+    // 大文档：不构建全量行号，交给 updateEditorLineNumberLayout 按可视窗口渲染
+    if (renderedEditorLineCount !== lineCount) {
+      renderedEditorLineCount = lineCount
+      virtualLineRange = null
+      editorLineNumbers.replaceChildren()
+    }
+    scheduleEditorLineNumberLayout()
+    return
+  }
   if (lineCount !== renderedEditorLineCount) {
     const fragment = document.createDocumentFragment()
     for (let line = 1; line <= lineCount; line += 1) {
@@ -831,12 +867,12 @@ function updateEditorLineNumberLayout() {
   markProgrammaticScroll(editor)
   markProgrammaticScroll(editorLineNumbers)
   const style = getComputedStyle(editor)
-  if (editor.value.length > LARGE_DOCUMENT_CHARS) {
+  const lineCount = markdownLineCount()
+  if (lineCount >= VIRTUAL_LINE_MIN || editor.value.length > LARGE_DOCUMENT_CHARS) {
+    // 大文档：估算行高 + 可视窗口虚拟化行号（DOM 节点数与行数解耦）
     const lineHeight = editorLineHeight()
-    const lineCount = markdownLineCount()
     editorLineOffsets = Array.from({ length: lineCount + 1 }, (_, index) => index * lineHeight)
-    ;[...editorLineNumbers.children].forEach((number) => (number as HTMLElement).style.height = `${lineHeight}px`)
-    editorLineMeasure.replaceChildren()
+    renderVirtualLineNumbers(lineCount, lineHeight)
     syncEditorLineNumbers()
     return
   }
@@ -878,6 +914,39 @@ function updateEditorLineNumberLayout() {
 function scheduleEditorLineNumberLayout() {
   if (editorLineLayoutFrame !== null) return
   editorLineLayoutFrame = requestAnimationFrame(updateEditorLineNumberLayout)
+}
+
+/**
+ * 虚拟行号：只渲染可视窗口 ± overscan 的行号，首尾用空白占位撑出总高度，
+ * 保持与编辑区滚动同步。窗口未变化时直接复用上次渲染结果，避免每帧重建 DOM。
+ */
+function renderVirtualLineNumbers(lineCount: number, lineHeight: number) {
+  const start = Math.max(0, Math.floor(editor.scrollTop / lineHeight) - VIRTUAL_LINE_OVERSCAN)
+  const end = Math.min(lineCount, Math.ceil((editor.scrollTop + editor.clientHeight) / lineHeight) + VIRTUAL_LINE_OVERSCAN)
+  if (
+    virtualLineRange !== null
+    && virtualLineRange.start === start
+    && virtualLineRange.end === end
+    && virtualLineRange.lineCount === lineCount
+  ) return
+  virtualLineRange = { start, end, lineCount }
+  const fragment = document.createDocumentFragment()
+  const topSpacer = document.createElement('div')
+  topSpacer.className = 'editor-virtual-spacer'
+  topSpacer.style.height = `${start * lineHeight}px`
+  fragment.append(topSpacer)
+  for (let line = start + 1; line <= end; line += 1) {
+    const number = document.createElement('span')
+    number.className = 'editor-line-number'
+    number.textContent = String(line)
+    number.style.height = `${lineHeight}px`
+    fragment.append(number)
+  }
+  const bottomSpacer = document.createElement('div')
+  bottomSpacer.className = 'editor-virtual-spacer'
+  bottomSpacer.style.height = `${(lineCount - end) * lineHeight}px`
+  fragment.append(bottomSpacer)
+  editorLineNumbers.replaceChildren(fragment)
 }
 
 function syncEditorLineNumbers() {
@@ -949,7 +1018,7 @@ function setMarkdown(value: string) {
   editor.value = value
   renderEditorLineNumbers(value)
   renderPreview(value)
-  updateCount()
+  scheduleCountUpdate()
   schedulePersist()
   updateDocumentSaveState()
 }
@@ -957,11 +1026,11 @@ function setMarkdown(value: string) {
 function renderOnly() {
   renderEditorLineNumbers()
   markdown = editor.value
-  updateCount()
+  scheduleCountUpdate()
   schedulePersist()
   updateDocumentSaveState()
   if (largePreviewTimer) clearTimeout(largePreviewTimer)
-  if (editor.value.length > LARGE_DOCUMENT_CHARS) {
+  if (editor.value.length > PREVIEW_DEBOUNCE_CHARS) {
     largePreviewTimer = setTimeout(() => {
       largePreviewTimer = null
       renderPreview(editor.value)
@@ -975,6 +1044,7 @@ function recordUndoState() {
   const value = editor.value
   if (value.length > LARGE_DOCUMENT_CHARS) return
   if (undoStack.at(-1)?.value === value) return
+  redoStack.length = 0 // 新的编辑使重做历史失效
   undoStack.push({
     value,
     start: editor.selectionStart ?? value.length,
@@ -983,14 +1053,28 @@ function recordUndoState() {
   if (undoStack.length > MAX_UNDO_STEPS) undoStack.shift()
 }
 
+function applyHistoryState(state: { value: string; start: number; end: number }) {
+  editor.value = state.value
+  markdown = state.value
+  editor.setSelectionRange(state.start, state.end)
+  renderOnly()
+}
+
 function undoMarkdown() {
   const previous = undoStack.pop()
   if (!previous) return false
-  editor.value = previous.value
-  markdown = previous.value
-  editor.setSelectionRange(previous.start, previous.end)
-  renderOnly()
+  redoStack.push(previous)
+  applyHistoryState(previous)
   showToast('已撤回', 'success')
+  return true
+}
+
+function redoMarkdown() {
+  const next = redoStack.pop()
+  if (!next) return false
+  undoStack.push(next)
+  applyHistoryState(next)
+  showToast('已重做', 'success')
   return true
 }
 
@@ -1234,22 +1318,26 @@ function renderPreview(value: string) {
   previewImageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
   previewImageObjectUrls.clear()
   preview.innerHTML = renderMarkdown(value)
-  preview.querySelectorAll<HTMLTableElement>('table').forEach((table, index) => {
-    enhancePreviewTable(table, index)
-  })
-  preview.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
-    const code = pre.querySelector<HTMLElement>('code')
-    if (!code) return
-    enhanceCodeBlock(code)
-    const wrapper = document.createElement('div')
-    const button = document.createElement('button')
-    wrapper.className = 'code-block'
-    button.type = 'button'
-    button.className = 'code-copy-btn'
-    setCodeCopyButtonState(button)
-    pre.before(wrapper)
-    wrapper.append(pre, button)
-  })
+  // 巨型文档跳过表格可编辑增强与代码块高亮/复制按钮：预览保持纯静态渲染
+  // （图片懒加载与本地图片解析仍生效），单次渲染成本大幅下降
+  if (value.length <= PREVIEW_STATIC_CHARS) {
+    preview.querySelectorAll<HTMLTableElement>('table').forEach((table) => {
+      enhancePreviewTable(table)
+    })
+    preview.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
+      const code = pre.querySelector<HTMLElement>('code')
+      if (!code) return
+      enhanceCodeBlock(code)
+      const wrapper = document.createElement('div')
+      const button = document.createElement('button')
+      wrapper.className = 'code-block'
+      button.type = 'button'
+      button.className = 'code-copy-btn'
+      setCodeCopyButtonState(button)
+      pre.before(wrapper)
+      wrapper.append(pre, button)
+    })
+  }
   preview.querySelectorAll<HTMLImageElement>('img').forEach((image) => {
     image.addEventListener('load', () => {
       image.classList.remove('is-pending')
@@ -1349,11 +1437,11 @@ function tableCellMarkdown(value: string) {
   return value.trim().replace(/\|/g, '\\|')
 }
 
-function writeMarkdownTable(tableIndex: number, mutate: (rows: string[][], divider: string[]) => void) {
+function writeMarkdownTable(sourceStartLine: number, mutate: (rows: string[][], divider: string[]) => void) {
   if (writingPreviewTable) return
   writingPreviewTable = true
   const lines = editor.value.split('\n')
-  const table = findMarkdownTables(editor.value)[tableIndex]
+  const table = findMarkdownTables(editor.value).find((item) => item.start === sourceStartLine)
   if (!table) {
     writingPreviewTable = false
     return
@@ -1401,7 +1489,12 @@ function createTableControlButton(label: string, iconPath: string) {
   return button
 }
 
-function enhancePreviewTable(table: HTMLTableElement, tableIndex: number) {
+function enhancePreviewTable(table: HTMLTableElement) {
+  // 只有 Markdown 语法生成的表格带 data-source-line（源码起始行，1-based）；
+  // 原始 HTML 表格不启用可编辑增强，避免 DOM 顺序与 GFM 解析器顺序错位导致改错表
+  const sourceLineAttr = table.getAttribute('data-source-line')
+  if (sourceLineAttr === null) return
+  const sourceStartLine = Number.parseInt(sourceLineAttr, 10) - 1
   const wrapper = document.createElement('div')
   wrapper.className = 'preview-table-editor'
   table.before(wrapper)
@@ -1429,7 +1522,7 @@ function enhancePreviewTable(table: HTMLTableElement, tableIndex: number) {
       if (beforeEdit === undefined) return
       const value = (cell.textContent || '').replace(/\s+/g, ' ').trim()
       if (value !== beforeEdit) {
-        writeMarkdownTable(tableIndex, (rows) => { rows[row][column] = value })
+        writeMarkdownTable(sourceStartLine, (rows) => { rows[row][column] = value })
       }
     })
   })
@@ -1449,19 +1542,19 @@ function enhancePreviewTable(table: HTMLTableElement, tableIndex: number) {
   wrapper.append(rowEdge, columnEdge)
 
   addRow.addEventListener('click', () => {
-    writeMarkdownTable(tableIndex, (rows) => rows.push(Array(rows[0].length).fill('')))
+    writeMarkdownTable(sourceStartLine, (rows) => rows.push(Array(rows[0].length).fill('')))
   })
   removeRow.addEventListener('click', () => {
-    writeMarkdownTable(tableIndex, (rows) => { rows.pop() })
+    writeMarkdownTable(sourceStartLine, (rows) => { rows.pop() })
   })
   addColumn.addEventListener('click', () => {
-    writeMarkdownTable(tableIndex, (rows, divider) => {
+    writeMarkdownTable(sourceStartLine, (rows, divider) => {
       rows.forEach((row, index) => row.push(index === 0 ? '列名' : ''))
       divider.push('---')
     })
   })
   removeColumn.addEventListener('click', () => {
-    writeMarkdownTable(tableIndex, (rows, divider) => {
+    writeMarkdownTable(sourceStartLine, (rows, divider) => {
       rows.forEach((row) => row.pop())
       divider.pop()
     })
@@ -1775,15 +1868,23 @@ function markdownImagePath(path: string) {
   return /[\s()]/.test(path) ? `<${path}>` : path
 }
 
+// 同一文件的写操作按顺序排队：手动保存与自动保存并发时，
+// 后发起的写（内容更新）必须最后落盘，避免旧快照覆盖新内容
+const fileWriteQueues = new Map<string, Promise<void>>()
+
+function enqueueFileWrite(target: string, operation: () => Promise<void>): Promise<void> {
+  const previous = fileWriteQueues.get(target) ?? Promise.resolve()
+  const next = previous.then(operation, operation)
+  fileWriteQueues.set(target, next)
+  const cleanup = next.finally(() => {
+    if (fileWriteQueues.get(target) === next) fileWriteQueues.delete(target)
+  })
+  void cleanup.catch(() => undefined)
+  return next
+}
+
 async function writeMarkdownFile(target: string, content: string) {
-  if (saveInFlight) await saveInFlight
-  const operation = writeTextFile(target, content)
-  saveInFlight = operation
-  try {
-    await operation
-  } finally {
-    if (saveInFlight === operation) saveInFlight = null
-  }
+  return enqueueFileWrite(target, () => writeTextFile(target, content))
 }
 
 async function autoSaveCurrentFile(trigger: 'interval' | 'window-blur' | 'file-switch'): Promise<'saved' | 'skipped' | 'failed'> {
@@ -1803,7 +1904,7 @@ async function autoSaveCurrentFile(trigger: 'interval' | 'window-blur' | 'file-s
   setDocumentSaveState('saving')
   const operation = (async (): Promise<'saved' | 'skipped' | 'failed'> => {
     try {
-      await writeExistingTextFile(target, content)
+      await enqueueFileWrite(target, () => writeExistingTextFile(target, content))
       if (currentFile === target && markdown === content) lastSavedMarkdown = content
       updateDocumentSaveState()
       autoSaveErrorShown = false
@@ -2832,6 +2933,15 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault()
     return
   }
+  // 重做：Ctrl+Y（Windows/Linux）或 Ctrl/Command + Shift + Z（macOS 习惯）
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'y' && redoMarkdown()) {
+    e.preventDefault()
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && redoMarkdown()) {
+    e.preventDefault()
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
     e.preventDefault()
     toggleFileTree()
@@ -3403,9 +3513,11 @@ function updatePreviewScrollAnchors() {
   const previewPaddingBottom = Number.parseFloat(previewStyle.paddingBottom) || 0
   const byLine = new Map<number, number>()
 
+  let anchorCollectionBudget = PREVIEW_ANCHOR_MAX_ELEMENTS
   preview.querySelectorAll<HTMLElement>('[data-source-line]').forEach((element) => {
     const line = Number.parseInt(element.dataset.sourceLine || '', 10)
     if (!Number.isFinite(line) || byLine.has(line)) return
+    if (--anchorCollectionBudget < 0) return // 大文档：只收集前 N 个锚点，避免全量强制布局
     const top = element.getBoundingClientRect().top - previewRect.top + preview.scrollTop - previewPaddingTop
     byLine.set(line, Math.max(0, top))
   })
@@ -3538,7 +3650,12 @@ function isUserDrivenScroll(target: HTMLElement) {
 function handleScrollEvent(event: Event) {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
-  if (target === editor) syncEditorLineNumbers()
+  if (target === editor) {
+    syncEditorLineNumbers()
+    // 仅虚拟行号（大文档）需要滚动时重建可视窗口；小文档行号随 scrollTop 同步即可，
+    // 避免每帧对全部行做 getBoundingClientRect 强制布局
+    if (markdownLineCount() >= VIRTUAL_LINE_MIN) scheduleEditorLineNumberLayout()
+  }
   if (!isUserDrivenScroll(target)) return
   userScrollIntentAt.set(target, performance.now())
   showScrollbarsForActivity(target)

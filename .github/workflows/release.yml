@@ -54,8 +54,42 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-  publish:
+  quality_gate:
+    name: quality gate (typecheck + smoke + rust tests)
     needs: release_metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_metadata.outputs.tag }}
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 Linux 系统依赖（Tauri 编译所需）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx tsc --noEmit
+
+      - name: 转换冒烟测试
+        run: node scripts/smoke-convert.mjs
+
+      - name: Rust 单元测试
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  publish:
+    needs: [release_metadata, quality_gate]
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     strategy:

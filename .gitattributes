@@ -1,0 +1,8 @@
+# 强制 GitHub Actions 工作流与发布说明使用 LF 换行。
+# CRLF 会导致 runner 中 bash 脚本行尾带 \r：heredoc 定界符（<<EOF）匹配失败、
+# 变量值/文件名拼接带回车，产生看似"玄学"的 0 秒失败。
+.github/workflows/* text eol=lf
+.github/release-notes/* text eol=lf
+
+# 其余文本文件按仓库默认处理（git autocrlf）
+* text=auto

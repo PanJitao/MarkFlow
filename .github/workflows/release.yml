@@ -22,6 +22,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      release_notes: ${{ steps.notes.outputs.release_notes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,6 +38,22 @@ jobs:
           fi
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - id: notes
+        name: 读取发布说明（.github/release-notes/<version>.md）
+        run: |
+          notes_file=".github/release-notes/${RELEASE_TAG#v}.md"
+          if [ ! -f "$notes_file" ]; then
+            echo "::error file=$notes_file::未找到版本发布说明文件，请先在 .github/release-notes/ 下创建后重新触发"
+            exit 1
+          fi
+          {
+            echo "release_notes<<EOF"
+            cat "$notes_file"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
   quality_gate:
     name: quality gate (typecheck + smoke + rust tests)
@@ -129,8 +146,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: ${{ needs.release_metadata.outputs.tag }}
-          releaseName: ${{ needs.release_metadata.outputs.version }}
-          releaseBody: MarkFlow ${{ needs.release_metadata.outputs.version }}（详细说明见仓库 README）
+          releaseName: MarkFlow ${{ needs.release_metadata.outputs.version }}
+          releaseBody: ${{ needs.release_metadata.outputs.release_notes }}
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} ${{ matrix.args }}

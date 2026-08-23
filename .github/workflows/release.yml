@@ -38,6 +38,28 @@ jobs:
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
+      # tauri-action 对已存在的同名 Release 只上传资产、不更新 body（其源码行为），
+      # 因此这里用 gh api 直接 PATCH 发布说明，保证重复发版时说明也同步更新。
+      # 不涉及 GITHUB_OUTPUT 多行 heredoc，规避本仓库 runner 的定界符问题。
+      - name: 更新已存在 Release 的发布说明
+        run: |
+          notes_file=".github/release-notes/${RELEASE_TAG#v}.md"
+          if [ ! -f "$notes_file" ]; then
+            echo "::error file=$notes_file::未找到版本发布说明文件，请先在 .github/release-notes/ 下创建后重新触发"
+            exit 1
+          fi
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .id 2>/dev/null || true)"
+          if [ -n "$release_id" ] && [ "$release_id" != "null" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -f body="$(cat "$notes_file")" >/dev/null
+            echo "已更新 Release #${release_id} 的发布说明"
+          else
+            echo "Release 尚不存在，说明将由 tauri-action 创建时写入"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
   quality_gate:
     name: quality gate (typecheck + smoke + rust tests)
     needs: release_metadata

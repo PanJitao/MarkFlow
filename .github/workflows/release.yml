@@ -39,22 +39,35 @@ jobs:
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       # tauri-action 对已存在的同名 Release 只上传资产、不更新 body（其源码行为），
-      # 因此这里用 gh api 直接 PATCH 发布说明，保证重复发版时说明也同步更新。
-      # 不涉及 GITHUB_OUTPUT 多行 heredoc，规避本仓库 runner 的定界符问题。
+      # 因此这里用 REST API 直接 PATCH 发布说明，保证重复发版时说明也同步更新。
+      # 用 curl（runner 预装、状态码明确）替代 gh api（其 404 输出行为不可靠）。
       - name: 更新已存在 Release 的发布说明
         run: |
+          set +e
           notes_file=".github/release-notes/${RELEASE_TAG#v}.md"
           if [ ! -f "$notes_file" ]; then
             echo "::error file=$notes_file::未找到版本发布说明文件，请先在 .github/release-notes/ 下创建后重新触发"
             exit 1
           fi
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .id 2>/dev/null || true)"
-          if [ -n "$release_id" ] && [ "$release_id" != "null" ]; then
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-              -f body="$(cat "$notes_file")" >/dev/null
-            echo "已更新 Release #${release_id} 的发布说明"
+          api_base="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth="Authorization: Bearer ${GITHUB_TOKEN}"
+          body_file="$(mktemp)"
+          # 导出说明为 JSON（node 在 runner 预装）
+          node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1], JSON.stringify({ body: fs.readFileSync(process.argv[2], "utf8") }))' "$body_file" "$notes_file"
+          http_code="$(curl -s -o /dev/null -w '%{http_code}' -H "$auth" -H "Accept: application/vnd.github+json" "${api_base}/releases/tags/${RELEASE_TAG}")"
+          echo "DEBUG: GET releases/tags/${RELEASE_TAG} -> HTTP ${http_code}"
+          if [ "$http_code" = "200" ]; then
+            release_id="$(curl -s -H "$auth" -H "Accept: application/vnd.github+json" "${api_base}/releases/tags/${RELEASE_TAG}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(String(JSON.parse(s).id||""))}')"
+            patch_code="$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "$auth" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" --data-binary "@${body_file}" "${api_base}/releases/${release_id}")"
+            echo "DEBUG: PATCH releases/${release_id} -> HTTP ${patch_code}"
+            if [ "$patch_code" = "200" ] || [ "$patch_code" = "201" ]; then
+              echo "已更新 Release #${release_id} 的发布说明"
+            else
+              echo "::error::PATCH 发布说明失败（HTTP ${patch_code}）"
+              exit 1
+            fi
           else
-            echo "Release 尚不存在，说明将由 tauri-action 创建时写入"
+            echo "Release 尚不存在（HTTP ${http_code}），说明将由 tauri-action 创建时写入"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

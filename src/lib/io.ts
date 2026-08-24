@@ -97,6 +97,11 @@ export function pathExists(path: string): Promise<boolean> {
   return invoke<boolean>('path_exists', { path })
 }
 
+/** 判断路径是否为存在的目录（path_exists 只判断文件，目录一律返回 false） */
+export function directoryExists(path: string): Promise<boolean> {
+  return invoke<boolean>('directory_exists', { path })
+}
+
 /** 按路径读取二进制文件，用于本地图片预览。 */
 export function readFileBytes(path: string): Promise<number[]> {
   return invoke<number[]>('read_file_bytes', { path })

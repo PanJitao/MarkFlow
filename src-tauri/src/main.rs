@@ -133,6 +133,11 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_file()
 }
 
+#[tauri::command]
+fn directory_exists(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
 /// 读取二进制文件为原始字节（用于 .docx / .xlsx），零拷贝传给前端
 #[tauri::command]
 fn read_file_bytes(path: String) -> Result<Response, String> {
@@ -1501,6 +1506,22 @@ mod tests {
     }
 
     #[test]
+    fn directory_exists_only_accepts_directories() {
+        let root = test_directory("directory-exists");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("document.md");
+        fs::write(&file, "content").unwrap();
+        // 目录返回 true、而 path_exists（is_file）对目录返回 false
+        assert!(directory_exists(root.to_string_lossy().to_string()));
+        assert!(!path_exists(root.to_string_lossy().to_string()));
+        // 文件对 directory_exists 返回 false
+        assert!(!directory_exists(file.to_string_lossy().to_string()));
+        // 不存在的路径返回 false
+        assert!(!directory_exists(root.join("missing").to_string_lossy().to_string()));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn oversized_file_is_rejected_by_read_guard() {
         let root = test_directory("size-limit");
         fs::create_dir_all(&root).unwrap();
@@ -1785,6 +1806,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             path_exists,
+            directory_exists,
             read_file_bytes,
             file_size,
             write_text_file,

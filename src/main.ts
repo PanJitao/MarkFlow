@@ -42,6 +42,7 @@ import {
   writeBytesFile,
   readTextFile,
   pathExists,
+  directoryExists,
   readFileBytes,
   swapExtension,
   getLaunchFile,
@@ -244,6 +245,7 @@ const MAX_UNDO_STEPS = 100
 
 const APP_WINDOW_TITLE = 'MarkFlow 文档转换工作台'
 const RECENT_FOLDERS_KEY = 'markflow:recentFolders'
+const EXPANDED_TREE_DIRS_KEY = 'markflow:expandedTreeDirs'
 const STANDALONE_IMAGE_DIR_KEY = 'markflow:standaloneImageDir'
 const MAX_RECENT_FOLDERS = 10
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -284,6 +286,68 @@ function rememberRecentFolder(path: string) {
   const recent = [path, ...loadRecentFolders().filter((item) => item !== path)].slice(0, MAX_RECENT_FOLDERS)
   localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(recent))
   renderRecentFolderList()
+}
+
+/** 持久化文件树展开状态，重启后可恢复上次浏览位置 */
+function persistExpandedTreeDirs() {
+  try {
+    localStorage.setItem(EXPANDED_TREE_DIRS_KEY, JSON.stringify([...expandedTreeDirectories]))
+  } catch {
+    // 容量超限等异常时忽略，仅丢失展开状态
+  }
+}
+
+/**
+ * 计算启动恢复时需要展开的目录集合（纯函数，便于测试）：
+ * 根目录恒展开 + 上次保存的、仍位于根内的子目录 + 当前文件所在的父目录链。
+ */
+export function computeRestoredExpandedDirs(folder: string, savedDirs: string[], currentFile: string | null): string[] {
+  const result = new Set<string>([folder])
+  for (const dir of savedDirs) {
+    if (typeof dir === 'string' && dir !== folder && pathIsSameOrChild(dir, folder)) result.add(dir)
+  }
+  if (currentFile && pathIsSameOrChild(currentFile, folder)) {
+    let dir = parentDirectoryFromPath(currentFile)
+    while (dir && pathIsSameOrChild(dir, folder) && dir !== folder) {
+      result.add(dir)
+      const next = parentDirectoryFromPath(dir)
+      if (next === dir) break
+      dir = next
+    }
+  }
+  return [...result]
+}
+
+/**
+ * 启动时恢复上次打开的文件夹（最近列表首个）及其展开状态；
+ * 若当前文件位于该文件夹内，额外展开到文件所在层级，便于快速定位。
+ */
+async function restoreWorkspaceFolder(): Promise<void> {
+  const recent = loadRecentFolders()
+  if (!recent.length) return
+  const folder = recent[0]
+  // 注意：path_exists 只判断文件（is_file），目录必须用 directory_exists
+  if (!(await directoryExists(folder))) return
+  workspaceRoot = folder
+  workspaceLabel.textContent = fileNameFromPath(folder) || folder
+  workspaceLabel.title = folder
+  // 上次展开的子目录（可能带损坏数据，逐个做存在性过滤）
+  let saved: string[] = []
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(EXPANDED_TREE_DIRS_KEY) || '[]')
+    if (Array.isArray(raw)) saved = raw.filter((dir): dir is string => typeof dir === 'string')
+  } catch {
+    // 损坏的展开记录，忽略
+  }
+  const candidates = saved.filter((dir) => dir !== folder && pathIsSameOrChild(dir, folder))
+  const existing = await Promise.all(candidates.map(async (dir) =>
+    (await directoryExists(dir)) ? dir : null))
+  const surviving = existing.filter((dir): dir is string => dir !== null)
+  expandedTreeDirectories.clear()
+  for (const dir of computeRestoredExpandedDirs(folder, surviving, currentFile)) {
+    expandedTreeDirectories.add(dir)
+  }
+  persistExpandedTreeDirs()
 }
 
 function setCurrentFile(path: string | null) {
@@ -575,7 +639,7 @@ async function checkForUpdate(manual = false): Promise<boolean> {
     availableUpdate = update
     updateInstalling = false
     updateVersionEl.textContent = `发现新版本 ${update.version}，当前版本 ${update.currentVersion}`
-    updateStatusEl.textContent = update.body || '确认后将下载并安装更新。'
+    updateStatusEl.innerHTML = update.body?.trim() ? renderMarkdown(update.body) : '确认后将下载并安装更新。'
     updateProgressEl.value = 0
     updateProgressEl.hidden = true
     setUpdateControls(false)
@@ -2049,17 +2113,42 @@ async function prepareMarkdownForOpen(path: string, source: string) {
   }
 }
 
+/**
+ * 切换到新工作区文件夹：文件树、标签、编辑器上下文联动。
+ * - 切换前按「切换文件时自动保存」策略保存当前文档；保存失败则中止切换。
+ * - 当前打开的文档属于新文件夹：保留文档，树中自动高亮。
+ * - 当前打开的文档不属于新文件夹：复位编辑器到欢迎页（避免显示旧文件夹内容）。
+ * - 未命名的未保存草稿：保留内容继续编辑，不丢数据。
+ */
+async function switchWorkspaceRoot(newRoot: string): Promise<boolean> {
+  const previousFile = currentFile
+  if (!await saveBeforeFileSwitch()) return false
+  workspaceRoot = newRoot
+  rememberRecentFolder(newRoot)
+  expandedTreeDirectories.clear()
+  expandedTreeDirectories.add(newRoot)
+  workspaceLabel.textContent = fileNameFromPath(newRoot) || newRoot
+  workspaceLabel.title = newRoot
+  await renderWorkspaceTree()
+  const docBelongsToRoot = previousFile && pathIsSameOrChild(previousFile, newRoot)
+  if (previousFile && !docBelongsToRoot) {
+    // 旧文件夹的文档：复位编辑器上下文
+    undoStack.length = 0
+    redoStack.length = 0
+    setCurrentFile(null)
+    setMarkdown(SAMPLE)
+    setStatus(`已打开文件夹 ${newRoot}，编辑器已复位`)
+    showToast(`已切换到文件夹 ${fileNameFromPath(newRoot) || newRoot}`, 'success')
+  } else {
+    setStatus(`已打开文件夹 ${newRoot}`)
+  }
+  return true
+}
+
 async function openWorkspaceFolder() {
   const folder = await pickOpenFolder()
   if (!folder) return
-  workspaceRoot = folder
-  rememberRecentFolder(folder)
-  expandedTreeDirectories.clear()
-  expandedTreeDirectories.add(folder)
-  workspaceLabel.textContent = fileNameFromPath(folder) || folder
-  workspaceLabel.title = folder
-  await renderWorkspaceTree()
-  setStatus(`已打开文件夹 ${folder}`)
+  await switchWorkspaceRoot(folder)
 }
 
 async function renderWorkspaceTree() {
@@ -2079,6 +2168,7 @@ async function renderWorkspaceTree() {
   try {
     await appendTreeEntries(fragment, workspaceRoot, 0)
     fileTree.replaceChildren(fragment)
+    persistExpandedTreeDirs()
   } catch (error) {
     fileTree.replaceChildren(Object.assign(document.createElement('p'), {
       className: 'file-tree-empty',
@@ -3038,12 +3128,7 @@ function positionRecentFilesMenu() {
 async function openRecentFolder(path: string) {
   try {
     await readDirectory(path)
-    workspaceRoot = path
-    expandedTreeDirectories.clear()
-    expandedTreeDirectories.add(path)
-    await renderWorkspaceTree()
-    rememberRecentFolder(path)
-    setStatus(`已打开文件夹 ${path}`)
+    await switchWorkspaceRoot(path)
     toggleFileMenu(false)
   } catch (error) {
     const retained = loadRecentFolders().filter((item) => item !== path)
@@ -3847,6 +3932,7 @@ async function init() {
       setMarkdown(prepared.markdown)
       lastSavedMarkdown = prepared.externalized ? null : prepared.markdown
       updateDocumentSaveState()
+      await restoreWorkspaceFolder()
       await renderWorkspaceTree()
       if (prepared.externalized) {
         setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 ${shortcutLabel('S')} 保存轻量 Markdown`)
@@ -3864,6 +3950,7 @@ async function init() {
     log('error', 'open', `打开启动文件失败：${errMsg(err)}`)
   }
   await restoreSession()
+  await restoreWorkspaceFolder()
   await renderWorkspaceTree()
   setStatus('就绪')
 }

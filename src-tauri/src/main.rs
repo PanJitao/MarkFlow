@@ -450,7 +450,7 @@ fn resolve_relative_path(from_file: String, relative: String) -> Result<String, 
 }
 
 #[tauri::command]
-fn new_window(app: tauri::AppHandle) -> Result<(), String> {
+async fn new_window(app: tauri::AppHandle) -> Result<(), String> {
     let label = format!("document-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
     tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App("index.html".into()))
         .title("MarkFlow 文档转换工作台")

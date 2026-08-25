@@ -4,7 +4,7 @@
 import './jsdom-env.mjs'
 import { markdownToDocxBlob } from '../src/lib/convert.ts'
 import { externalizeMarkdownDataImages } from '../src/lib/externalize-image.ts'
-import { buildHtmlDocument, markdownToHtml } from '../src/lib/markdown.ts'
+import { buildHtmlDocument, markdownToHtml, renderMarkdown } from '../src/lib/markdown.ts'
 import zlib from 'node:zlib'
 
 let pass = 0
@@ -130,6 +130,32 @@ const oversized = await externalizeMarkdownDataImages(oversizedMd, async () => '
 check('超大图片跳过外置', oversized.imageCount === 0 && oversized.skippedImages === 1)
 check('跳过时保留原 data URI', oversized.markdown.includes('data:image/png;base64'))
 check('跳过时不调用存储', storedInlineImages === 1)
+
+// 6) Mermaid 代码块：预览渲染成容器，导出保持代码块
+console.log('测试：Mermaid 代码块渲染')
+const mermaidMd = [
+  '```mermaid',
+  'mindmap',
+  '  root((项目))',
+  '    前端',
+  '    后端',
+  '```',
+  '',
+  '```javascript',
+  "console.log('hi')",
+  '```',
+].join('\n')
+const previewHtml = renderMarkdown(mermaidMd, { mermaid: true })
+check('预览包含 .mermaid 容器', previewHtml.includes('class="mermaid"'))
+check('预览容器保留源码属性', previewHtml.includes('data-mermaid-code="mindmap'))
+check('预览容器带源码行号', /data-source-line="\d+"/.test(previewHtml))
+check('普通代码块不受影响', previewHtml.includes('language-javascript'))
+const exportHtml = markdownToHtml(mermaidMd)
+check('导出保持代码块（不渲染 mermaid）', exportHtml.includes('language-mermaid') && !exportHtml.includes('class="mermaid"'))
+const evilPreview = renderMarkdown(['```mermaid', 'A[<script>alert(1)</script>]', '```'].join('\n'), { mermaid: true })
+check('图表源码属性被转义', evilPreview.includes('&lt;script&gt;'))
+const updateDialogHtml = renderMarkdown(mermaidMd)
+check('更新说明等默认调用保持代码块', updateDialogHtml.includes('language-mermaid') && !updateDialogHtml.includes('class="mermaid"'))
 
 console.log(`
 结果：${pass} 通过，${fail} 失败`)

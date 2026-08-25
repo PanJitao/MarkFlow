@@ -14,11 +14,13 @@ import python from 'highlight.js/lib/languages/python'
 import sql from 'highlight.js/lib/languages/sql'
 import { isTauri } from '@tauri-apps/api/core'
 import { Image } from '@tauri-apps/api/image'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi'
+import { availableMonitors, getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { renderMarkdown, buildHtmlDocument } from './lib/markdown'
+import { renderMermaidContainers, rerenderMermaidContainers } from './lib/mermaid'
 import { externalizeMarkdownDataImages } from './lib/externalize-image'
 import { attachLogErrorHandlers, formatLogExport, log } from './lib/log'
 import {
@@ -246,6 +248,11 @@ const MAX_UNDO_STEPS = 100
 const APP_WINDOW_TITLE = 'MarkFlow 文档转换工作台'
 const RECENT_FOLDERS_KEY = 'markflow:recentFolders'
 const EXPANDED_TREE_DIRS_KEY = 'markflow:expandedTreeDirs'
+const EDITOR_HIDDEN_KEY = 'markflow:editorHidden'
+const WINDOW_BOUNDS_KEY = 'markflow:windowBounds'
+// 主窗口（label=main）才恢复/保存会话与窗口布局；「新建窗口」产生的独立窗口保持空白，
+// 避免它用 localStorage 复制主窗口内容，或反向覆盖主窗口的上次会话。
+const isMainWindow = !isTauri() || getCurrentWindow().label === 'main'
 const STANDALONE_IMAGE_DIR_KEY = 'markflow:standaloneImageDir'
 const MAX_RECENT_FOLDERS = 10
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -382,6 +389,8 @@ function clearPersistedSession() {
 
 /** 立即把当前编辑器内容 + 文件路径写入本地存储，下次打开可恢复 */
 function persistNow() {
+  // 新建的独立窗口不写入会话：避免空白窗口关闭时覆盖主窗口的上次会话
+  if (!isMainWindow) return
   const state = currentFile && editor.value.length > LARGE_DOCUMENT_CHARS
     ? { currentFile }
     : { markdown: editor.value, currentFile }
@@ -699,6 +708,7 @@ function restartAutoSaveTimer() {
 
 function applyAppearance(settings: AppearanceSettings) {
   const root = document.documentElement
+  const previousTheme = root.dataset.theme
   const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
   const darkTheme = settings.themeMode === 'dark' || (settings.themeMode === 'system' && systemDark)
   root.dataset.theme = darkTheme ? 'dark' : 'light'
@@ -778,6 +788,10 @@ function applyAppearance(settings: AppearanceSettings) {
     void backgroundVideo.play().catch(() => undefined)
   }
   restartAutoSaveTimer()
+  if (previousTheme && previousTheme !== root.dataset.theme) {
+    // mermaid SVG 配色在渲染时固化，主题切换后需要按新主题重绘
+    rerenderMermaidContainers(preview, () => schedulePreviewScrollAnchors())
+  }
 }
 
 function iconMimeType(path: string) {
@@ -1381,10 +1395,11 @@ function renderPreview(value: string) {
   previewImageObserver = null
   previewImageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
   previewImageObjectUrls.clear()
-  preview.innerHTML = renderMarkdown(value)
+  const interactiveRender = value.length <= PREVIEW_STATIC_CHARS
+  preview.innerHTML = renderMarkdown(value, { mermaid: interactiveRender })
   // 巨型文档跳过表格可编辑增强与代码块高亮/复制按钮：预览保持纯静态渲染
   // （图片懒加载与本地图片解析仍生效），单次渲染成本大幅下降
-  if (value.length <= PREVIEW_STATIC_CHARS) {
+  if (interactiveRender) {
     preview.querySelectorAll<HTMLTableElement>('table').forEach((table) => {
       enhancePreviewTable(table)
     })
@@ -1401,6 +1416,8 @@ function renderPreview(value: string) {
       pre.before(wrapper)
       wrapper.append(pre, button)
     })
+    // mermaid 代码块渲染成图表（异步；完成后重新校准滚动锚点）
+    void renderMermaidContainers(preview, () => schedulePreviewScrollAnchors())
   }
   preview.querySelectorAll<HTMLImageElement>('img').forEach((image) => {
     image.addEventListener('load', () => {
@@ -2689,8 +2706,12 @@ windowCloseBtn.addEventListener('click', () => {
 
 // 关闭前拦截：先等自动保存与会话持久化落地，再真正销毁窗口，避免 WebView 销毁中断写入
 if (isTauri()) {
+  const currentWindow = getCurrentWindow()
+  // 窗口移动/缩放时防抖记录位置与尺寸（仅主窗口）
+  void currentWindow.onMoved(() => scheduleWindowBoundsSave())
+  void currentWindow.onResized(() => scheduleWindowBoundsSave())
   let closing = false
-  void getCurrentWindow().onCloseRequested(async (event) => {
+  void currentWindow.onCloseRequested(async (event) => {
     if (closing) return // 放行我们自己发起的关闭（destroy 兜底后的二次 close）
     event.preventDefault()
     closing = true
@@ -2701,6 +2722,9 @@ if (isTauri()) {
         persistTimer = null
       }
       persistNow()
+      // 关闭前落盘最后一次窗口位置/尺寸与文件树展开状态
+      await saveWindowBounds()
+      persistExpandedTreeDirs()
     } catch {
       // 保存失败不阻止关闭；状态栏与 toast 已给出失败提示
     }
@@ -3808,12 +3832,22 @@ function toggleFileTree() {
 }
 fileTreeToggleBtn.addEventListener('click', toggleFileTree)
 
+function setEditorVisible(visible: boolean) {
+  workspace.classList.toggle('editor-hidden', !visible)
+  editorToggleBtn.setAttribute('aria-expanded', String(visible))
+  editorToggleBtn.title = visible ? '隐藏编辑区' : '展开编辑区'
+  editorToggleLabel.textContent = visible ? '隐藏编辑区' : '展开编辑区'
+}
+
+setEditorVisible(localStorage.getItem(EDITOR_HIDDEN_KEY) !== 'true')
 editorToggleBtn.addEventListener('click', () => {
-  const hidden = !workspace.classList.contains('editor-hidden')
-  workspace.classList.toggle('editor-hidden', hidden)
-  editorToggleBtn.setAttribute('aria-expanded', String(!hidden))
-  editorToggleBtn.title = hidden ? '展开编辑区' : '隐藏编辑区'
-  editorToggleLabel.textContent = hidden ? '展开编辑区' : '隐藏编辑区'
+  const visible = workspace.classList.contains('editor-hidden')
+  setEditorVisible(visible)
+  try {
+    localStorage.setItem(EDITOR_HIDDEN_KEY, String(!visible))
+  } catch {
+    // 存储不可用时仅保留当前窗口效果
+  }
 })
 
 function applySplit(pct: number): number {
@@ -3893,6 +3927,74 @@ fileTreeSplitter.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowRight') { e.preventDefault(); localStorage.setItem(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current + 20)}px`) }
 })
 
+// ---------- 窗口位置与尺寸记忆 ----------
+let windowBoundsSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleWindowBoundsSave() {
+  if (!isMainWindow) return
+  if (windowBoundsSaveTimer) clearTimeout(windowBoundsSaveTimer)
+  windowBoundsSaveTimer = setTimeout(() => {
+    windowBoundsSaveTimer = null
+    void saveWindowBounds()
+  }, 400)
+}
+
+async function saveWindowBounds() {
+  if (!isTauri() || !isMainWindow) return
+  try {
+    const win = getCurrentWindow()
+    const position = await win.outerPosition()
+    const size = await win.outerSize()
+    localStorage.setItem(WINDOW_BOUNDS_KEY, JSON.stringify({
+      x: position.x,
+      y: position.y,
+      width: size.width,
+      height: size.height,
+    }))
+  } catch {
+    // 关闭过程中窗口句柄可能已不可用，忽略
+  }
+}
+
+async function restoreWindowBounds() {
+  if (!isTauri() || !isMainWindow) return
+  let saved: { x: number; y: number; width: number; height: number } | null = null
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(WINDOW_BOUNDS_KEY) || 'null')
+    const candidate = raw as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null
+    if (candidate && [candidate.x, candidate.y, candidate.width, candidate.height]
+      .every((value) => typeof value === 'number' && Number.isFinite(value))) {
+      saved = candidate as { x: number; y: number; width: number; height: number }
+    }
+  } catch {
+    saved = null
+  }
+  if (!saved) return
+  const win = getCurrentWindow()
+  try {
+    const monitors = await availableMonitors()
+    const width = Math.max(900, Math.min(saved.width, 6000))
+    const height = Math.max(600, Math.min(saved.height, 4000))
+    // 窗口与某个显示器仍有交集才恢复位置，避免上次的副屏被拔掉后找不到窗口
+    const stillVisible = monitors.some((monitor) => {
+      const rect = {
+        x: monitor.position.x,
+        y: monitor.position.y,
+        w: monitor.size.width,
+        h: monitor.size.height,
+      }
+      return saved.x < rect.x + rect.w - 60
+        && saved.x + width > rect.x + 60
+        && saved.y < rect.y + rect.h - 40
+        && saved.y + height > rect.y + 40
+    })
+    if (stillVisible) await win.setPosition(new PhysicalPosition(saved.x, saved.y))
+    await win.setSize(new PhysicalSize(width, height))
+  } catch {
+    // 恢复失败时保持默认位置与尺寸
+  }
+}
+
 async function setupImageDrop() {
   if (!isTauri()) return
   const scaleFactor = await getCurrentWindow().scaleFactor()
@@ -3922,6 +4024,11 @@ async function setupImageDrop() {
 async function init() {
   attachLogErrorHandlers()
   log('info', 'app', isTauri() ? 'MarkFlow 桌面端启动' : 'MarkFlow 浏览器预览环境')
+  if (!isMainWindow) {
+    // 新建的独立窗口：空白启动，不复制主窗口的文件树/工作区/上次会话
+    await blankSessionStart()
+    return
+  }
   try {
     const launchFile = await getLaunchFile()
     if (launchFile) {
@@ -3955,6 +4062,18 @@ async function init() {
   setStatus('就绪')
 }
 
+/**
+ * 新主窗口的启动入口之外，还有「新建窗口」产生的独立窗口（label=document-N）。
+ * 独立窗口保持空白：不恢复上次会话/工作区/文件树，也不写入会话状态。
+ */
+async function blankSessionStart() {
+  workspaceRoot = null
+  setCurrentFile(null)
+  setMarkdown('')
+  await renderWorkspaceTree()
+  setStatus('就绪')
+}
+
 applyAppearance(appearanceSettings)
 updateStandaloneImageDirSetting()
 void restoreConfiguredIcons()
@@ -3964,5 +4083,7 @@ systemThemeMedia?.addEventListener('change', () => {
 })
 void restoreBackground()
 void setupImageDrop().catch((error) => console.warn('初始化图片拖拽失败', error))
+// 恢复上次关闭时的窗口位置与尺寸（仅主窗口）
+void restoreWindowBounds()
 void init()
 setTimeout(() => void checkForUpdate(), 1200)

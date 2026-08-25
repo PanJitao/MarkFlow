@@ -894,6 +894,32 @@ textarea:focus-visible {
   color: #ffffff;
   box-shadow: none;
 }
+#preview .mermaid {
+  margin: 1em 0;
+  padding: 14px;
+  border: 1px solid var(--line-clean);
+  border-radius: var(--radius-sm-clean);
+  background: color-mix(in srgb, var(--surface-soft-clean) 58%, transparent);
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+  line-height: 1.6;
+}
+#preview .mermaid svg {
+  display: block;
+  max-width: none;
+  margin: 0 auto;
+}
+#preview .mermaid.mermaid-error {
+  text-align: left;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #b91c1c;
+  border-color: color-mix(in srgb, #b91c1c 45%, transparent);
+}
+:root[data-theme='dark'] #preview .mermaid.mermaid-error { color: #fca5a5; }
 #editor-context-menu {
   position: fixed;
   z-index: 1200;
@@ -1941,6 +1967,7 @@ body { padding: 0; background: var(--bg); }
   }
   #preview table,
   #preview img,
-  #preview blockquote { break-inside: avoid; }
+  #preview blockquote,
+  #preview .mermaid { break-inside: avoid; }
   #preview a { color: inherit; text-decoration: underline; }
 }

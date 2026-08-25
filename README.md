@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <img src="app-icon.png" width="96" alt="MarkFlow logo" />
 
@@ -8,7 +8,7 @@
 
 Markdown、Word、Excel、HTML、PDF 的转换、编辑、预览和文件夹管理都在一个桌面应用中完成。
 
-[![Version](https://img.shields.io/badge/version-0.4.2-1f7a8c.svg)](https://github.com/PanJitao/MarkFlow/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.4.3-1f7a8c.svg)](https://github.com/PanJitao/MarkFlow/releases/latest)
 ![Tauri](https://img.shields.io/badge/desktop-Tauri%20v2-24c8db.svg)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3a6ea5.svg)
 [![License](https://img.shields.io/badge/license-MIT-4c956c.svg)](LICENSE)
@@ -23,21 +23,21 @@ Markdown、Word、Excel、HTML、PDF 的转换、编辑、预览和文件夹管�
 
 MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown 源码编辑与实时预览，支持 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word、HTML 或 PDF。打开文件夹后，可在左侧文件树中浏览 Markdown 和图片资源。
 
-当前源码版本为 `0.4.2`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
+当前源码版本为 `0.4.3`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
 
 ## 截图
 
 ### 文件夹工作区与实时预览
 
-![MarkFlow 0.4.2 主界面](docs/screenshots/markflow-0.3.25-main.png)
+![MarkFlow 0.4.3 主界面](docs/screenshots/markflow-0.3.25-main.png)
 
 ### 设置概览
 
-![MarkFlow 0.4.2 设置概览](docs/screenshots/markflow-0.3.25-settings.png)
+![MarkFlow 0.4.3 设置概览](docs/screenshots/markflow-0.3.25-settings.png)
 
 ### 转换菜单
 
-![MarkFlow 0.4.2 转换菜单](docs/screenshots/markflow-0.3.25-convert.png)
+![MarkFlow 0.4.3 转换菜单](docs/screenshots/markflow-0.3.25-convert.png)
 
 ## 核心功能
 
@@ -57,12 +57,13 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 - 列表和引用按 Enter 自动续写当前层级；空标记行再次按 Enter 可退出结构。
 - 工具栏支持标题、加粗、斜体、列表、引用、表格、代码块和链接。
 - 支持全局撤回，编辑区、格式工具和预览表格修改均可使用 `Ctrl/Command + Z`。
-- 自动恢复上次编辑内容、当前文件和界面布局。
+- 自动恢复上次编辑内容、当前文件与界面布局：窗口位置和尺寸、编辑区/文件树显隐、文件树展开状态、分栏比例都会在重启后还原；「新建窗口」则打开空白编辑窗口。
 
 ### 表格、代码块与上下文菜单
 
 - 预览表格可直接编辑单元格，悬停表格边界可新增或删除行、列；双击单元格可选中该单元格内容。
 - 代码块提供行号、JSON 键值高亮和复制图标，支持 Java、Python、JavaScript、Node.js、C、C++、C#、SQL、PowerShell、CMD/BAT、Apex、ABAP 和 Bash 等语法高亮。
+- 支持 ```mermaid 图表渲染：思维导图（mindmap）、流程图、时序图、甘特图等，图表配色跟随亮/暗主题切换，语法错误时在图表位置显示具体原因。
 - 编辑器上下文菜单提供复制、粘贴、JSON 格式化、插入表格、插入引用、插入图片和多语言代码块。
 - JSON 格式化失败时会显示具体行号、列号和解析原因。
 
@@ -175,7 +176,7 @@ npm run tauri -- build --bundles nsis
 Windows NSIS 安装程序输出至：
 
 ```text
-src-tauri/target/release/bundle/nsis/MarkFlow_0.4.2_x64-setup.exe
+src-tauri/target/release/bundle/nsis/MarkFlow_0.4.3_x64-setup.exe
 ```
 
 ## 项目结构
@@ -191,7 +192,8 @@ src-tauri/target/release/bundle/nsis/MarkFlow_0.4.2_x64-setup.exe
 │     ├─ appearance.ts         外观设置与背景素材本地存储
 │     ├─ convert.ts            Markdown → Word 导出
 │     ├─ io.ts                 Tauri 文件读写封装
-│     └─ markdown.ts           Markdown 渲染与 HTML 导出
+│     ├─ markdown.ts           Markdown 渲染与 HTML 导出
+│     └─ mermaid.ts            Mermaid 图表懒加载与主题渲染
 └─ src-tauri/
    ├─ src/main.rs             Rust 文件系统命令、文件关联与外部链接处理
    ├─ icons/                  Windows 与 macOS 应用图标
@@ -204,7 +206,7 @@ src-tauri/target/release/bundle/nsis/MarkFlow_0.4.2_x64-setup.exe
 - 前端：原生 TypeScript 与 [Vite](https://vitejs.dev/)。
 - 办公文档导入（Word/PowerPoint/Excel/ODF/RTF/EPUB/CSV/PDF）：Rust 端 [anydoc](https://crates.io/crates/anydoc) 引擎。
 - Word 导出：[docx](https://github.com/dolanmiu/docx)。
-- 渲染与清理：[markdown-it](https://github.com/markdown-it/markdown-it)、[highlight.js](https://highlightjs.org/) 和 [DOMPurify](https://github.com/cure53/DOMPurify)。
+- 渲染与清理：[markdown-it](https://github.com/markdown-it/markdown-it)、[highlight.js](https://highlightjs.org/)、[Mermaid](https://mermaid.js.org/) 和 [DOMPurify](https://github.com/cure53/DOMPurify)。
 
 ## 许可证
 

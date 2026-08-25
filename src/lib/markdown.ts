@@ -152,8 +152,30 @@ renderer.core.ruler.push('source-line-attributes', (state: any) => {
   })
 })
 
+// ---------- Mermaid 图表 ----------
+// 预览渲染（env.mermaid === true）时，```mermaid 代码块不再输出为普通代码块，
+// 而是输出成 <div class="mermaid" data-mermaid-code="…"> 容器，由 src/lib/mermaid.ts
+// 在渲染后调用 mermaid 库绘制成 SVG。源码同时保留在 data-mermaid-code 属性与文本内容里：
+// - 属性用于主题切换时重渲染、以及 JS 渲染前的兜底；
+// - 文本内容保证 mermaid 加载失败时用户仍能看到源码。
+// 导出 HTML / 更新说明等场景（env.mermaid 未设置）保持原有代码块行为。
+
+const defaultFenceRenderer = renderer.renderer.rules.fence
+renderer.renderer.rules.fence = (tokens: any, index: number, options: any, env: any, self: any) => {
+  const token = tokens[index]
+  const language = String(token.info || '').trim().split(/\s+/)[0]
+  if (env?.mermaid && language === 'mermaid') {
+    const escaped = renderer.utils.escapeHtml(token.content)
+    const line = token.map ? String(token.map[0] + 1) : '1'
+    return `<div class="mermaid" data-source-line="${line}" data-mermaid-code="${escaped}">${escaped}</div>\n`
+  }
+  return defaultFenceRenderer
+    ? defaultFenceRenderer(tokens, index, options, env, self)
+    : self.renderToken(tokens, index, options)
+}
+
 const SANITIZE_OPTIONS = {
-  ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'loading', 'decoding'],
+  ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'data-mermaid-code', 'loading', 'decoding'],
 }
 
 function sanitizeHtml(html: string): string {
@@ -161,8 +183,12 @@ function sanitizeHtml(html: string): string {
 }
 
 /** 把 Markdown 渲染成预览用的 HTML（经过消毒，防 XSS） */
-export function renderMarkdown(markdown: string): string {
-  return sanitizeHtml(renderer.render(markdown, { sourceMap: true, lazyImages: true }))
+export function renderMarkdown(markdown: string, options: { mermaid?: boolean } = {}): string {
+  return sanitizeHtml(renderer.render(markdown, {
+    sourceMap: true,
+    lazyImages: true,
+    mermaid: options.mermaid === true,
+  }))
 }
 
 /** 把 Markdown 渲染成纯 HTML 片段（消毒后用于导出） */

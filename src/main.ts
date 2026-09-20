@@ -297,6 +297,8 @@ function rememberRecentFolder(path: string) {
 
 /** 持久化文件树展开状态，重启后可恢复上次浏览位置 */
 function persistExpandedTreeDirs() {
+  // 与会话/布局一致：独立窗口不回写，避免覆盖主窗口下次要恢复的浏览位置
+  if (!isMainWindow) return
   try {
     localStorage.setItem(EXPANDED_TREE_DIRS_KEY, JSON.stringify([...expandedTreeDirectories]))
   } catch {
@@ -1697,6 +1699,31 @@ function insertCodeBlock(language: string) {
   applyEdit(text.slice(0, start) + block + text.slice(end), contentStart, contentStart + selected.length)
 }
 
+// Mermaid 图表骨架：空的 ```mermaid 块本身就是语法错误，插入可直接成图的最小示例，
+// 插入后选中图表正文（不含 fence），便于直接替换成实际内容。
+const MERMAID_TEMPLATES: Record<string, string> = {
+  flowchart: ['flowchart LR', '  A[开始] --> B{判断}', '  B -->|是| C[处理]', '  B -->|否| D[结束]', '  C --> D'].join('\n'),
+  sequence: ['sequenceDiagram', '  participant 甲', '  participant 乙', '  甲->>乙: 请求', '  乙-->>甲: 响应'].join('\n'),
+  state: ['stateDiagram-v2', '  [*] --> 待处理', '  待处理 --> 进行中: 开始', '  进行中 --> 完成: 提交', '  完成 --> [*]'].join('\n'),
+  class: ['classDiagram', '  类A <|-- 类B', '  类A : +String 属性', '  类A : +方法()'].join('\n'),
+  mindmap: ['mindmap', '  root((主题))', '    分支一', '      细项', '    分支二'].join('\n'),
+  gantt: ['gantt', '  title 计划', '  dateFormat YYYY-MM-DD', '  section 阶段一', '  任务A :a1, 2026-01-01, 3d', '  任务B :a2, after a1, 2d'].join('\n'),
+  pie: ['pie title 占比', '  "甲" : 45', '  "乙" : 35', '  "丙" : 20'].join('\n'),
+  er: ['erDiagram', '  客户 ||--o{ 订单 : 拥有', '  订单 ||--|{ 明细 : 包含'].join('\n'),
+}
+
+function insertMermaidDiagram(kind: string) {
+  const template = MERMAID_TEMPLATES[kind]
+  if (!template) return
+  const { text, start, end } = getSelection()
+  const prefix = start > 0 && text[start - 1] !== '\n' ? '\n' : ''
+  const suffix = end < text.length && text[end] !== '\n' ? '\n' : ''
+  const opening = `\`\`\`mermaid\n`
+  const block = `${prefix}${opening}${template}\n\`\`\`${suffix}`
+  const contentStart = start + prefix.length + opening.length
+  applyEdit(text.slice(0, start) + block + text.slice(end), contentStart, contentStart + template.length)
+}
+
 /** Tab：无选区插入两个空格；有选区则给选中的每一行加两格缩进 */
 function indentOrInsert() {
   const { text, start, end } = getSelection()
@@ -2960,12 +2987,14 @@ editorContextMenu.addEventListener('click', async (event) => {
   if (target.closest('[data-context-submenu]')) return
 
   const language = target.closest<HTMLButtonElement>('[data-context-code]')?.dataset.contextCode
+  const diagram = target.closest<HTMLButtonElement>('[data-context-diagram]')?.dataset.contextDiagram
   const action = target.closest<HTMLButtonElement>('[data-context-action]')?.dataset.contextAction
-  if (!language && !action) return
+  if (!language && !diagram && !action) return
 
   restoreContextSelection()
   try {
     if (language) insertCodeBlock(language)
+    else if (diagram) insertMermaidDiagram(diagram)
     else if (action === 'copy') await copyEditorSelection()
     else if (action === 'paste') await pasteIntoEditor()
     else if (action === 'format-json') formatJsonCodeBlock()
@@ -3818,6 +3847,20 @@ const SPLIT_KEY = 'exchangemd:split'
 const FILE_TREE_HIDDEN_KEY = 'markflow:fileTreeHidden'
 const FILE_TREE_WIDTH_KEY = 'markflow:fileTreeWidth'
 
+/**
+ * 记录工作区布局（面板显隐、分栏比例、文件树宽度）。
+ * 与 persistNow 同样只认主窗口：「新建窗口」开出的独立窗口会沿用主窗口布局，
+ * 但它自己的调整不回写，避免覆盖主窗口下次启动要恢复的布局。
+ */
+function persistLayout(key: string, value: string) {
+  if (!isMainWindow) return
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 存储不可用（容量超限/隐私模式）时仅保留当前窗口效果
+  }
+}
+
 function setFileTreeVisible(visible: boolean) {
   workspace.classList.toggle('file-tree-hidden', !visible)
   fileTreeToggleBtn.setAttribute('aria-expanded', String(visible))
@@ -3828,7 +3871,7 @@ setFileTreeVisible(localStorage.getItem(FILE_TREE_HIDDEN_KEY) !== 'true')
 function toggleFileTree() {
   const visible = workspace.classList.contains('file-tree-hidden')
   setFileTreeVisible(visible)
-  localStorage.setItem(FILE_TREE_HIDDEN_KEY, String(!visible))
+  persistLayout(FILE_TREE_HIDDEN_KEY, String(!visible))
 }
 fileTreeToggleBtn.addEventListener('click', toggleFileTree)
 
@@ -3843,11 +3886,7 @@ setEditorVisible(localStorage.getItem(EDITOR_HIDDEN_KEY) !== 'true')
 editorToggleBtn.addEventListener('click', () => {
   const visible = workspace.classList.contains('editor-hidden')
   setEditorVisible(visible)
-  try {
-    localStorage.setItem(EDITOR_HIDDEN_KEY, String(!visible))
-  } catch {
-    // 存储不可用时仅保留当前窗口效果
-  }
+  persistLayout(EDITOR_HIDDEN_KEY, String(!visible))
 })
 
 function applySplit(pct: number): number {
@@ -3877,7 +3916,7 @@ function startDrag(clientX: number) {
   const onUp = () => {
     splitter.classList.remove('dragging')
     document.body.style.cursor = ''
-    localStorage.setItem(SPLIT_KEY, workspace.style.getPropertyValue('--split') || '54%')
+    persistLayout(SPLIT_KEY, workspace.style.getPropertyValue('--split') || '54%')
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
   }
@@ -3903,7 +3942,7 @@ function startFileTreeDrag(clientX: number) {
   const onUp = () => {
     fileTreeSplitter.classList.remove('dragging')
     document.body.style.cursor = ''
-    localStorage.setItem(FILE_TREE_WIDTH_KEY, workspace.style.getPropertyValue('--tree-width') || '230px')
+    persistLayout(FILE_TREE_WIDTH_KEY, workspace.style.getPropertyValue('--tree-width') || '230px')
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
   }
@@ -3918,13 +3957,13 @@ fileTreeSplitter.addEventListener('mousedown', (e) => {
 // 键盘可达：左右方向键微调（可访问性）
 splitter.addEventListener('keydown', (e) => {
   const cur = parseFloat(workspace.style.getPropertyValue('--split')) || 54
-  if (e.key === 'ArrowLeft') { e.preventDefault(); localStorage.setItem(SPLIT_KEY, applySplit(cur - 2) + '%') }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); localStorage.setItem(SPLIT_KEY, applySplit(cur + 2) + '%') }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); persistLayout(SPLIT_KEY, applySplit(cur - 2) + '%') }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); persistLayout(SPLIT_KEY, applySplit(cur + 2) + '%') }
 })
 fileTreeSplitter.addEventListener('keydown', (e) => {
   const current = parseFloat(workspace.style.getPropertyValue('--tree-width')) || 230
-  if (e.key === 'ArrowLeft') { e.preventDefault(); localStorage.setItem(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current - 20)}px`) }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); localStorage.setItem(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current + 20)}px`) }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); persistLayout(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current - 20)}px`) }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); persistLayout(FILE_TREE_WIDTH_KEY, `${applyFileTreeWidth(current + 20)}px`) }
 })
 
 // ---------- 窗口位置与尺寸记忆 ----------

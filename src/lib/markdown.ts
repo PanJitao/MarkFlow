@@ -154,10 +154,13 @@ renderer.core.ruler.push('source-line-attributes', (state: any) => {
 
 // ---------- Mermaid 图表 ----------
 // 预览渲染（env.mermaid === true）时，```mermaid 代码块不再输出为普通代码块，
-// 而是输出成 <div class="mermaid" data-mermaid-code="…"> 容器，由 src/lib/mermaid.ts
-// 在渲染后调用 mermaid 库绘制成 SVG。源码同时保留在 data-mermaid-code 属性与文本内容里：
-// - 属性用于主题切换时重渲染、以及 JS 渲染前的兜底；
-// - 文本内容保证 mermaid 加载失败时用户仍能看到源码。
+// 而是输出成 <div class="mermaid" data-mermaid> 容器，由 src/lib/mermaid.ts
+// 在渲染后读取容器文本内容、调用 mermaid 库绘制成 SVG。
+// 源码只放在文本内容里，不再写进属性：DOMPurify 的 SAFE_FOR_XML 会丢弃任何
+// 含 `-->`、`--!>`、`]>` 的属性值（purify 的「comments inside attributes」防护），
+// 而这些正是 flowchart / stateDiagram / sequenceDiagram 的常用箭头写法，
+// 一旦源码放在属性里，这类图表的容器会在消毒后失去源码而无法渲染。
+// 文本内容同时保证 mermaid 加载失败时用户仍能看到源码。
 // 导出 HTML / 更新说明等场景（env.mermaid 未设置）保持原有代码块行为。
 
 const defaultFenceRenderer = renderer.renderer.rules.fence
@@ -167,7 +170,7 @@ renderer.renderer.rules.fence = (tokens: any, index: number, options: any, env: 
   if (env?.mermaid && language === 'mermaid') {
     const escaped = renderer.utils.escapeHtml(token.content)
     const line = token.map ? String(token.map[0] + 1) : '1'
-    return `<div class="mermaid" data-source-line="${line}" data-mermaid-code="${escaped}">${escaped}</div>\n`
+    return `<div class="mermaid" data-source-line="${line}" data-mermaid="">${escaped}</div>\n`
   }
   return defaultFenceRenderer
     ? defaultFenceRenderer(tokens, index, options, env, self)
@@ -175,7 +178,7 @@ renderer.renderer.rules.fence = (tokens: any, index: number, options: any, env: 
 }
 
 const SANITIZE_OPTIONS = {
-  ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'data-mermaid-code', 'loading', 'decoding'],
+  ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'data-mermaid', 'loading', 'decoding'],
 }
 
 function sanitizeHtml(html: string): string {

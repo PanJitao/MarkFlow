@@ -147,15 +147,32 @@ const mermaidMd = [
 ].join('\n')
 const previewHtml = renderMarkdown(mermaidMd, { mermaid: true })
 check('预览包含 .mermaid 容器', previewHtml.includes('class="mermaid"'))
-check('预览容器保留源码属性', previewHtml.includes('data-mermaid-code="mindmap'))
+check('预览容器带 mermaid 标记', previewHtml.includes('data-mermaid'))
+check('预览容器文本保留源码', previewHtml.includes('mindmap') && previewHtml.includes('root((项目))'))
 check('预览容器带源码行号', /data-source-line="\d+"/.test(previewHtml))
 check('普通代码块不受影响', previewHtml.includes('language-javascript'))
 const exportHtml = markdownToHtml(mermaidMd)
 check('导出保持代码块（不渲染 mermaid）', exportHtml.includes('language-mermaid') && !exportHtml.includes('class="mermaid"'))
 const evilPreview = renderMarkdown(['```mermaid', 'A[<script>alert(1)</script>]', '```'].join('\n'), { mermaid: true })
 check('图表源码属性被转义', evilPreview.includes('&lt;script&gt;'))
+check('图表源码不产生可执行标签', !evilPreview.includes('<script'))
 const updateDialogHtml = renderMarkdown(mermaidMd)
 check('更新说明等默认调用保持代码块', updateDialogHtml.includes('language-mermaid') && !updateDialogHtml.includes('class="mermaid"'))
+
+// 回归：DOMPurify 的 SAFE_FOR_XML 会丢弃含 --> / --!> / ]> 的属性值，
+// 所以图表源码必须留在容器文本内容里，不能经过 HTML 属性搬运。
+console.log('测试：Mermaid 箭头语法在消毒后不丢失（回归）')
+const fence = '`'.repeat(3)
+for (const [name, code] of [
+  ['flowchart', 'flowchart LR\n  A-->B'],
+  ['stateDiagram', 'stateDiagram-v2\n  s1 --> s2'],
+  ['sequenceDiagram', 'sequenceDiagram\n  Alice-->>Bob: hi'],
+  ['classDiagram', 'classDiagram\n  A <|-- B'],
+]) {
+  const html = renderMarkdown([fence + 'mermaid', code, fence].join('\n'), { mermaid: true })
+  check(name + ' 容器与标记保留', html.includes('class="mermaid"') && html.includes('data-mermaid'))
+  check(name + ' 源码文本保留', html.includes(code.split('\n')[0]))
+}
 
 console.log(`
 结果：${pass} 通过，${fail} 失败`)

@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MarkFlow Pet Package v1",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "license": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "canvas": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 4096
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 4096
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "hitBox": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 1
+        },
+        "height": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "poster": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "clips": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 64,
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "fallback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 60000
+          },
+          "sprite": {
+            "type": "object",
+            "properties": {
+              "columns": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              },
+              "rows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              },
+              "frames": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1024
+              },
+              "fps": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 60
+              }
+            },
+            "required": [
+              "columns",
+              "rows",
+              "frames",
+              "fps"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "file",
+          "durationMs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "actions": {
+      "type": "object",
+      "required": [
+        "idle"
+      ],
+      "maxProperties": 32,
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "minItems": 1,
+        "maxItems": 32
+      }
+    },
+    "phrases": {
+      "type": "object",
+      "properties": {
+        "greeting": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "tap": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "maxItems": 20
+        },
+        "idle": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "maxItems": 20
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "version",
+    "id",
+    "name",
+    "canvas",
+    "poster",
+    "clips",
+    "actions"
+  ],
+  "additionalProperties": false
+}

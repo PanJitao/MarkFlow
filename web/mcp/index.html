@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MarkFlow Pet MCP — 让 AI 为你制作桌面宠物</title>
+  <meta name="description" content="MarkFlow 宠物 MCP 使用说明：复制一条完整指令，让支持本机 stdio 的外部 AI 读取规范、生成素材、校验并安装桌面宠物。">
+  <meta name="theme-color" content="#f5f6f3">
+  <link rel="canonical" href="https://markflow.wuhupan.top/mcp/">
+  <link rel="icon" href="../assets/img/app-icon.png" type="image/png">
+  <link rel="stylesheet" href="../assets/site.css?v=20261104-hd">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="../index.html" aria-label="MarkFlow 首页">
+        <img src="../assets/img/app-icon.png" width="28" height="28" alt="">
+        <span>MarkFlow</span>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <a href="#command">复制指令</a>
+        <a class="nav-secondary" href="#steps">接入步骤</a>
+        <a class="nav-secondary" href="#tools">工具</a>
+        <a href="../index.html#download">下载</a>
+        <a class="nav-external" href="https://github.com/PanJitao/MarkFlow" target="_blank" rel="noopener">GitHub<span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="mcp-hero wrap" aria-labelledby="mcp-title">
+      <div class="mcp-hero-grid">
+        <div>
+          <p class="eyebrow">MarkFlow Pet MCP · 0.4.5</p>
+          <h1 id="mcp-title">让 AI 为你<br>制作桌面宠物。</h1>
+          <p class="mcp-hero-lede">把角色描述交给支持本机 stdio 的外部 AI。它读取运行时规范，使用自己的绘图或动画工具制作素材，再通过 MarkFlow 校验、安装并显示新的桌面宠物。</p>
+        </div>
+        <aside class="boundary-note" aria-labelledby="boundary-title">
+          <p class="boundary-label" id="boundary-title">连接前准备</p>
+          <p>运行 MarkFlow，复制软件中的 MCP 配置，加入支持本机 stdio 的 AI 客户端。生成素材使用该客户端的绘图或视频工具。</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section command-section" id="command" aria-labelledby="command-title">
+      <div class="wrap">
+        <header class="section-heading">
+          <p class="eyebrow">可复制指令</p>
+          <div>
+            <h2 id="command-title">描述角色，然后交给 AI。</h2>
+            <p>填入角色描述，复制完整指令到已连接 MCP 的 AI 客户端。</p>
+          </div>
+        </header>
+
+        <div class="command-layout">
+          <div class="command-controls">
+            <label class="field-label" for="pet-description">角色描述</label>
+            <input class="text-field" id="pet-description" type="text" value="圆润的小机器人，蓝白配色，会挥手和休息" maxlength="300" autocomplete="off" spellcheck="false">
+            <p class="field-hint">描述仅在本页处理；留空使用示例。</p>
+            <div class="command-actions">
+              <button class="button button-primary" id="copy-command" type="button">复制指令</button>
+              <a class="button button-secondary" href="ai.txt" target="_blank" rel="noopener">打开 AI 指南<span aria-hidden="true">↗</span></a>
+              <a class="button button-secondary" href="pet.schema.json" target="_blank" rel="noopener">查看包规范<span aria-hidden="true">↗</span></a>
+            </div>
+          </div>
+
+          <div class="command-panel">
+            <div class="command-bar">
+              <span>复制给外部 AI 的完整指令</span>
+              <span>纯文本</span>
+            </div>
+            <pre tabindex="0"><code id="command-text">请先阅读 https://markflow.wuhupan.top/mcp/ 和 https://markflow.wuhupan.top/mcp/ai.txt ，遵循 https://markflow.wuhupan.top/mcp/pet.schema.json 的规范，使用我已配置的 markflow-pet MCP，为我制作【圆润的小机器人，蓝白配色，会挥手和休息】。
+
+先调用 pet_get_schema 和 pet_prepare_generation，再使用你自己的绘图或动画工具生成素材并保存到本机。
+
+完整包先校验再安装，单图或精灵图按运行时规范创建；最后切换新角色、显示宠物并核对状态。
+
+如果尚未接入MCP或缺少生成工具，明确告诉我缺少哪一步，不要声称已生成或已安装。</code></pre>
+            <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section wrap" id="steps" aria-labelledby="steps-title">
+      <header class="section-heading">
+        <p class="eyebrow">接入步骤</p>
+        <div>
+          <h2 id="steps-title">从本机连接到第一只宠物。</h2>
+          <p>需要 MarkFlow、一个支持本机 stdio 的 AI 客户端，以及该客户端可用的图像或视频生成工具。</p>
+        </div>
+      </header>
+
+      <ol class="steps">
+        <li class="step">
+          <span class="step-number" aria-hidden="true">01</span>
+          <div class="step-copy">
+            <h3>开启宠物 MCP</h3>
+            <p>运行包含宠物 MCP 的 0.4.5 版本，进入 <code>设置 → 主题与外观 → 宠物样式与 AI 接入</code>，开启“允许 MCP 控制宠物”，并复制界面生成的连接配置。</p>
+            <p>Windows 0.4.5 正式版包含此功能；macOS 0.4.5 为预览构建，尚未完成签名、公证与真机验证。</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-number" aria-hidden="true">02</span>
+          <div class="step-copy">
+            <h3>加入本机 stdio 配置</h3>
+            <p>在支持本机 stdio 的 AI 客户端中加入配置。使用软件界面生成的真实可执行文件路径与参数，不要自行猜测路径；保持 MarkFlow 运行。</p>
+            <p>连接与权限只在客户端完成，网页不能代替你连接本机。</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-number" aria-hidden="true">03</span>
+          <div class="step-copy">
+            <h3>生成、校验并安装</h3>
+            <p>复制上方指令，发送给具备图像或视频生成能力的外部 AI。它会按规范准备素材、校验宠物包、安装，再切换新角色并显示宠物。</p>
+            <p>MCP 不生成图片，也不需要填写模型密钥。生成能力来自外部 AI 已连接的工具。</p>
+          </div>
+        </li>
+      </ol>
+
+      <figure class="settings-figure">
+        <div class="shot-frame">
+          <button class="shot-trigger" type="button" data-shot="../assets/img/current-pet-mcp-hd.png" data-caption="宠物样式与 AI 接入 · MCP 设置区域" data-alt="MarkFlow 0.4.5 的宠物设置窗口，展示 MCP 开关、复制连接配置和复制生成指令入口。">
+            <img src="../assets/img/current-pet-mcp-hd.png" width="952" height="989" alt="MarkFlow 0.4.5 的宠物设置窗口，展示 MCP 开关、复制连接配置和复制生成指令入口。" loading="lazy" decoding="async">
+          </button>
+        </div>
+        <figcaption class="figure-caption">
+          <span>宠物样式与 AI 接入 · Windows 实拍</span>
+          <span class="zoom-hint">单击放大，可打开原图</span>
+        </figcaption>
+      </figure>
+    </section>
+
+    <section class="section wrap" id="tools" aria-labelledby="tools-title">
+      <header class="section-heading">
+        <p class="eyebrow">运行时工具</p>
+        <div>
+          <h2 id="tools-title">AI 可以调用哪些能力。</h2>
+          <p>工具由 AI 客户端调用，格式以本机返回的规范为准。</p>
+        </div>
+      </header>
+
+      <ul class="tool-list">
+        <li class="tool-item">
+          <code class="tool-name">pet_get_schema</code>
+          <p>读取包格式、参数与模板。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_prepare_generation</code>
+          <p>返回外部绘图或视频工具需要的制作规范，不生成像素。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_list</code>
+          <p>列出已安装角色与保存参数。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_get_state</code>
+          <p>查询当前角色、可用动作与最新命令状态。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_validate_pack</code>
+          <p>校验本地宠物包及其素材，不安装。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_install_pack</code>
+          <p>安装已校验的本地包，不覆盖已有 id。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_create_from_image</code>
+          <p>从本地图片或精灵图创建并安装宠物包。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_configure</code>
+          <p>调整大小、透明度、镜像、速度、气泡和问候语等参数。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_show</code>
+          <p>显示宠物，不收起编辑器。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_play</code>
+          <p>播放当前角色实际支持的动作。</p>
+        </li>
+        <li class="tool-item">
+          <code class="tool-name">pet_say</code>
+          <p>显示文字气泡，可同时指定动作。</p>
+        </li>
+      </ul>
+
+      <details class="advanced">
+        <summary>高级规范与限制</summary>
+        <div class="details-body">
+          <div class="details-grid">
+            <section>
+              <h3>连接与执行</h3>
+              <ul>
+                <li>仅支持本机 stdio MCP。使用界面生成的真实可执行文件路径、<code>--pet-mcp</code> 与 <code>--data-dir</code> 参数，不要猜测路径。</li>
+                <li>网页 URL 是文档，不是公网 MCP 端点。访问页面不能连接本机。</li>
+                <li>除 <code>pet_get_schema</code> 和 <code>pet_prepare_generation</code> 外，其余工具需要 MarkFlow 正在运行且 MCP 开关已开启。</li>
+                <li>请求在空闲时执行，30 秒后过期；连续请求会替换尚未执行的请求。</li>
+                <li>便签提醒和宠物拖动优先于 AI 动作。</li>
+                <li><code>queued</code> 只表示请求已入队，不代表动画已经播放完成。</li>
+              </ul>
+            </section>
+            <section>
+              <h3>素材与边界</h3>
+              <ul>
+                <li>MCP 不生成图片或视频，不调用模型，不需要在 MarkFlow 内填写模型密钥。</li>
+                <li>单个素材文件最大 64 MB；整个宠物包最大 256 MB。</li>
+                <li>单张静态图片只显示静态角色，不会自动成为多帧动画。</li>
+                <li>GIF 与 WebP 保留素材自身速度；速度参数用于视频和精灵图。</li>
+                <li>缺少标准动作会回退到 idle；播放前先查询角色实际支持的动作。</li>
+                <li>MCP 不开放编辑器文档、便签或待办内容。从宠物菜单彻底退出后，AI 无法继续控制。</li>
+                <li>素材需要真实作者与授权说明，不应为未知授权素材编造许可证。</li>
+              </ul>
+            </section>
+          </div>
+          <div class="details-links">
+            <a href="ai.txt" target="_blank" rel="noopener">AI 操作指南 ↗</a>
+            <a href="pet.schema.json" target="_blank" rel="noopener">宠物包规范 ↗</a>
+            <a href="protocol.json" target="_blank" rel="noopener">工具协议 ↗</a>
+          </div>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a class="brand" href="../index.html">
+            <img src="../assets/img/app-icon.png" width="26" height="26" alt="">
+            <span>MarkFlow</span>
+          </a>
+          <p>让外部 AI 制作并安装桌面宠物</p>
+        </div>
+        <nav class="footer-nav" aria-label="页脚导航">
+          <a href="../index.html">返回首页</a>
+          <a href="../index.html#download">下载</a>
+          <a href="https://github.com/PanJitao/MarkFlow" target="_blank" rel="noopener">GitHub ↗</a>
+          <a href="ai.txt" target="_blank" rel="noopener">AI 指南 ↗</a>
+          <a href="pet.schema.json" target="_blank" rel="noopener">包规范 ↗</a>
+        </nav>
+      </div>
+      <div class="footer-meta">
+        <p>此网址提供文档；MCP 通过本机 stdio 连接。</p>
+        <p>内置角色：<a href="https://github.com/PC2005-cloud/dsh-pet">dsh-pet</a> · 作者 <a href="https://github.com/PC2005-cloud">PC2005-cloud</a> · <a href="../assets/img/pet-LICENSE.txt">MIT</a> · © 2026 MarkFlow</p>
+      </div>
+    </div>
+  </footer>
+
+  <dialog class="lightbox" id="lightbox" aria-labelledby="lightbox-caption">
+    <div class="lightbox-toolbar">
+      <p class="lightbox-caption" id="lightbox-caption">界面截图</p>
+      <div class="lightbox-actions">
+        <a class="lightbox-original" id="lightbox-original" href="#" target="_blank" rel="noopener">打开原图 ↗</a>
+        <button class="lightbox-close" id="lightbox-close" type="button" aria-label="关闭截图">×</button>
+      </div>
+    </div>
+    <div class="lightbox-stage">
+      <img id="lightbox-image" alt="">
+    </div>
+  </dialog>
+
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -6,3 +6,4 @@
 
 # 其余文本文件按仓库默认处理（git autocrlf）
 * text=auto
+*.pdf binary

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MarkFlow 便签与待办</title></head>
+<body class="notes-page">
+  <header class="notes-titlebar"><div data-tauri-drag-region><span class="notes-mark" aria-hidden="true">▤</span><strong data-tauri-drag-region>桌面便签</strong><span class="notes-subtitle" data-tauri-drag-region>让小事有着落</span></div><button id="notes-close" aria-label="收起便签窗口" title="收起便签，宠物继续提醒">×</button></header>
+  <nav class="notes-tabs" aria-label="便签分类"><button data-tab="todos" aria-selected="true">待办 <span id="todo-count">0</span></button><button data-tab="notes" aria-selected="false">便签 <span id="note-count">0</span></button><button id="back-editor" title="返回编辑器">返回编辑器 ↗</button></nav>
+  <main class="notes-content">
+    <section id="todos-panel">
+      <div class="section-tools"><label class="completed-toggle"><input id="show-completed" type="checkbox">显示已完成</label><button id="add-todo" class="primary">＋ 新建待办</button></div>
+      <form id="todo-form" class="todo-form" hidden>
+        <label>待办内容<input id="todo-title" type="text" maxlength="300" required placeholder="例如：下午三点参加项目会议" autocomplete="off"></label>
+        <label>日期与时间<input id="todo-due" type="datetime-local" step="60"></label>
+        <fieldset id="reminders" disabled><legend>宠物提醒 · 可多选</legend><div class="reminder-options">
+          <label><input type="checkbox" name="remind" value="0" checked>准时</label><label><input type="checkbox" name="remind" value="15">提前 15 分钟</label><label><input type="checkbox" name="remind" value="30">提前 30 分钟</label><label><input type="checkbox" name="remind" value="60">提前 1 小时</label>
+          <label class="custom-reminder"><input id="custom-remind" type="checkbox">提前 <input id="custom-minutes" type="number" min="0" max="10080" step="1" value="10" aria-label="自定义提前分钟数"> 分钟</label>
+        </div></fieldset>
+        <p class="form-help">提醒按电脑本地时间触发；关闭编辑器后宠物仍继续运行。</p>
+        <div class="form-actions"><button id="cancel-todo" type="button">取消</button><button class="primary" type="submit">保存待办</button></div>
+      </form>
+      <div id="todo-list" class="todo-list"></div><p id="todo-empty" class="notes-empty">暂时没有待办。记下一件事，让桌面小伙伴替你留意时间。</p>
+    </section>
+    <section id="notes-panel" hidden><div class="section-tools"><span class="muted">随手记，自动保存</span><button id="add-note" class="primary">＋ 新建便签</button></div><div id="note-list" class="note-list"></div><p id="note-empty" class="notes-empty">把灵感、清单和临时想法留在这里。</p></section>
+  </main>
+  <footer class="notes-footer"><span id="notes-status" role="status">正在读取…</span><button id="retry-notes" hidden>重试保存</button><span class="running-label"><i></i>宠物后台提醒</span></footer>
+  <script type="module" src="/src/notes.ts"></script>
+</body></html>

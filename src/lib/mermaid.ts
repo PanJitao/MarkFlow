@@ -73,7 +73,7 @@ function sweepTempNodes() {
  * 全部完成后调用 onSettled（用于图表插入后重新校准滚动锚点）。
  * 渲染失败时把错误信息展示在容器内，并缓存源码，主题切换后会再次尝试。
  */
-export function renderMermaidContainers(root: HTMLElement, onSettled?: () => void): void {
+export async function renderMermaidContainers(root: HTMLElement, onSettled?: () => void): Promise<void> {
   const containers = [...root.querySelectorAll<HTMLElement>('.mermaid[data-mermaid]')]
   if (!containers.length) {
     onSettled?.()
@@ -82,7 +82,7 @@ export function renderMermaidContainers(root: HTMLElement, onSettled?: () => voi
   const generation = ++renderGeneration
   // 源码在替换 innerHTML 之前先读出来：成图后容器文本会变成 SVG 内容
   const jobs = containers.map((container) => ({ container, source: readSource(container) }))
-  void (async () => {
+  await (async () => {
     const mermaid = await loadMermaid()
     if (generation !== renderGeneration) {
       onSettled?.()

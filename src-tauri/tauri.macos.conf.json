@@ -1,0 +1,20 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MarkFlow 文档转换工作台",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "decorations": true,
+        "center": true
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["app", "dmg"]
+  }
+}

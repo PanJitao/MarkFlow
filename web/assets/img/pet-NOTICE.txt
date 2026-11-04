@@ -1,0 +1,6 @@
+Blue-haired character animation assets from dsh-pet.
+https://github.com/PC2005-cloud/dsh-pet
+Commit: 81ca3a0b6ad9802362656e7b93a5b4f757b2b91b
+Copyright (c) 2026 PC2005-cloud
+Licensed under the MIT License (see LICENSE.txt).
+Original VP9-alpha WebM files are unchanged; WebP and PNG variants are format conversions made for MarkFlow.

@@ -174,6 +174,18 @@ for (const [name, code] of [
   check(name + ' 源码文本保留', html.includes(code.split('\n')[0]))
 }
 
+console.log('测试：局部样式导出')
+const styled = '<strong>粗体<em>斜体</em></strong> <u>下划线</u> <s>删除线</s> <span style="color: #c92222; background-color: #fff2a8; font-size: 24px">彩色中文</span>'
+const styledHtml = buildHtmlDocument(styled, '样式')
+check('HTML 保留局部样式', styledHtml.includes('color: #c92222') && styledHtml.includes('<u>下划线</u>'))
+const styledDocx = Buffer.from(await (await markdownToDocxBlob(styled)).arrayBuffer())
+const styledXml = zipEntryBytes(styledDocx, 'word/document.xml').toString('utf8')
+check('Word 颜色', /w:color w:val="c92222"/i.test(styledXml))
+check('Word 高亮底色', /w:fill="fff2a8"/i.test(styledXml))
+check('Word 字号 px 转 half-points', styledXml.includes('w:sz w:val="36"'))
+check('Word 下划线与删除线', styledXml.includes('<w:u ') && styledXml.includes('<w:strike/>'))
+check('Word 不泄漏 HTML 标签', !styledXml.includes('&lt;span') && !styledXml.includes('&lt;u'))
+
 console.log(`
 结果：${pass} 通过，${fail} 失败`)
 process.exit(fail ? 1 : 0)

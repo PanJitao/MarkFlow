@@ -1,0 +1,36 @@
+name: desktop compatibility
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc }
+          - { runner: macos-latest, target: aarch64-apple-darwin }
+          - { runner: macos-latest, target: x86_64-apple-darwin }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:pet-bundle
+      - run: npm run test:workbench
+      - run: node scripts/smoke-convert.mjs
+      - name: Native Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Target compilation
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }}

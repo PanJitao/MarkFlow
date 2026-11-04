@@ -74,14 +74,19 @@
               <button data-file="ppt-to-md" data-convert role="menuitem" title="把 PowerPoint 演示文稿（.pptx/.ppt）转成 Markdown">PPT 转 MD</button>
               <button data-file="pdf-to-md" data-convert role="menuitem" title="把 PDF 转成 Markdown（仅支持文本型 PDF，扫描件需要先 OCR）">PDF 转 MD</button>
               <button data-file="doc-to-md" data-convert role="menuitem" title="把 ODT/ODS/ODP、RTF、EPUB、CSV 等文档转成 Markdown">更多文档转 MD</button>
-              <button data-file="md-to-docx" data-convert role="menuitem" title="选择 md 文件并导出为 Word">MD 转 Word</button>
-              <button data-file="export-html" data-convert role="menuitem" title="选择 md 文件并导出为 HTML">导出 HTML</button>
+              <button data-file="md-to-docx" data-convert role="menuitem" title="将当前文档（含未保存修改）导出为 Word">MD 转 Word</button>
+              <button data-file="export-html" data-convert role="menuitem" title="将当前文档（含未保存修改）导出为 HTML">导出 HTML</button>
               <button data-file="export-pdf" data-convert role="menuitem" title="把当前预览内容打印为 PDF">导出 PDF</button>
             </div>
           </div>
         </nav>
+        <button id="command-palette-btn" type="button" title="显示所有命令" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m16 16 5 5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span>搜索命令…</span><kbd id="command-shortcut"></kbd>
+        </button>
 
         <div class="topbar-end" aria-label="视图与设置">
+          <button id="desktop-notes-btn" type="button" title="桌面便签模式：宠物、便签与待办提醒" aria-label="进入桌面便签模式"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h14v12l-6 6H5zM13 21v-6h6M8 7h8M8 11h6"/></svg><span>便签模式</span></button>
           <div class="settings-wrap">
             <button id="settings-btn" class="settings-btn icon-only" title="设置" aria-label="设置" aria-haspopup="dialog" aria-expanded="false">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -104,6 +109,23 @@
             </div>
           </div>
         </div>
+
+      </header>
+
+      <section class="workspace" id="workspace">
+        <aside class="file-tree-panel" id="file-tree-panel">
+          <div class="file-tree-header">
+            <span id="workspace-label" title="未打开文件夹">文件</span>
+            <button class="icon-btn" data-file="open-folder" title="打开文件夹" aria-label="打开文件夹"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9l-3 11H3V4h7l2 3h7v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+          </div>
+          <div id="file-tree" class="file-tree" role="tree" aria-label="工作区文件"></div>
+        </aside>
+        <div class="file-tree-splitter" id="file-tree-splitter" role="separator" aria-orientation="vertical" aria-label="拖动调整文件树宽度" tabindex="0"></div>
+        <article class="panel editor-panel" id="editor-panel">
+          <div class="panel-header">
+            <span class="document-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h9l5 5v13H5zM14 3v6h5M8 13h8M8 17h6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span id="file-label" title="未保存的 Markdown 草稿">未命名.md</span></span>
+            <button id="find-btn" class="icon-btn" title="查找" aria-label="查找"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m16 16 5 5" stroke="currentColor" stroke-width="1.5"/></svg></button>
+          </div>
       <section class="toolbar" role="toolbar" aria-label="Markdown 格式">
         <button class="icon-btn" data-action="h1" aria-label="一级标题" title="一级标题">H1</button>
         <button class="icon-btn" data-action="h2" aria-label="二级标题" title="二级标题">H2</button>
@@ -117,25 +139,25 @@
         <button data-action="code" title="代码块"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8l-4 4 4 4M15 8l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>代码</button>
         <button data-action="link" title="插入链接"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>链接</button>
       </section>
-      </header>
-
-      <section class="workspace" id="workspace">
-        <aside class="file-tree-panel" id="file-tree-panel">
-          <div class="file-tree-header">
-            <span id="workspace-label" title="未打开文件夹">文件</span>
-          </div>
-          <div id="file-tree" class="file-tree" role="tree"></div>
-        </aside>
-        <div class="file-tree-splitter" id="file-tree-splitter" role="separator" aria-orientation="vertical" aria-label="拖动调整文件树宽度" tabindex="0"></div>
-        <article class="panel editor-panel" id="editor-panel">
-          <div class="panel-header">
-            <h2>编辑器</h2>
-            <span id="file-label">未保存的草稿 · Markdown 源码</span>
-          </div>
           <div class="editor-surface">
             <div id="editor-line-numbers" class="editor-line-numbers" aria-hidden="true"></div>
             <textarea id="editor" wrap="soft" spellcheck="false" placeholder="在这里输入 Markdown 内容…" aria-label="Markdown 编辑器"></textarea>
           </div>
+          <section id="find-widget" class="find-widget" aria-label="查找和替换" hidden>
+            <div class="find-row">
+              <button id="find-toggle-replace" title="展开或收起替换" aria-label="展开或收起替换" aria-expanded="false">›</button>
+              <input id="find-input" type="text" placeholder="查找" aria-label="查找文本" />
+              <button id="find-case" aria-label="区分大小写" title="区分大小写" aria-pressed="false">Aa</button>
+              <span id="find-count" role="status" aria-live="polite"></span>
+              <button id="find-previous" aria-label="上一个结果" title="上一个结果 (Shift+Enter)">↑</button>
+              <button id="find-next" aria-label="下一个结果" title="下一个结果 (Enter)">↓</button>
+              <button id="find-close" aria-label="关闭查找" title="关闭 (Esc)">×</button>
+            </div>
+            <div id="replace-row" class="find-row" hidden>
+              <input id="replace-input" type="text" placeholder="替换" aria-label="替换文本" />
+              <button id="replace-one">替换</button><button id="replace-all">全部替换</button>
+            </div>
+          </section>
         </article>
 
         <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="拖动调整编辑器与预览宽度" tabindex="0"></div>
@@ -157,11 +179,22 @@
           <span id="save-state" class="status-save-state" data-state="unsaved" role="status" aria-live="polite">未保存</span>
         </span>
         <span class="status-right">
+          <span id="cursor-position">行 1，列 1</span>
+          <span>Markdown</span>
           <span id="word-count">0 字</span>
           <span id="zoom-level" aria-label="内容显示比例 100%">100%</span>
         </span>
       </footer>
     </div>
+
+    <dialog id="command-palette" aria-label="命令面板">
+      <div class="command-input-row">
+        <input id="command-input" type="text" role="combobox" aria-label="搜索命令" aria-controls="command-list" aria-expanded="true" aria-autocomplete="list" placeholder="输入命令名称…" autocomplete="off" />
+        <button id="command-close" title="关闭 (Esc)" aria-label="关闭命令面板">×</button>
+      </div>
+      <div id="command-list" role="listbox" aria-label="可用命令"></div>
+      <p class="command-hint">↑ ↓ 选择 · Enter 执行 · Esc 关闭</p>
+    </dialog>
 
     <dialog id="appearance-dialog" class="appearance-dialog settings-dialog" aria-labelledby="appearance-title">
       <form method="dialog">
@@ -194,10 +227,21 @@
           </section>
 
           <div class="settings-panel-header" data-settings-group="appearance" hidden><div><button type="button" class="settings-back" data-settings-target="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>设置概览</button><strong>主题与外观</strong><span>主题颜色和内容层级保持可读，浅色背景下边框仍清晰可见。</span></div></div>
+          <div class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">桌面宠物</span><button type="button" id="pet-settings-btn" class="settings-action">宠物样式与 AI 接入</button></div>
+          <div class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">壁纸与专属参数</span><button type="button" id="wallpaper-library-btn" class="settings-action" data-wallpaper-open>选择壁纸与调节参数</button></div>
           <div class="appearance-control theme-setting" data-settings-group="appearance" hidden>
             <span class="appearance-label">主题模式</span>
             <div class="theme-segmented" role="group" aria-label="主题模式"><button type="button" data-theme-mode="light" aria-pressed="true">浅色</button><button type="button" data-theme-mode="dark" aria-pressed="false">深色</button><button type="button" data-theme-mode="system" aria-pressed="false">跟随系统</button></div>
           </div>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">文件树字体</span><select data-typography="treeFont" aria-label="文件树字体"><option value="system">系统无衬线</option><option value="mono">等宽字体</option><option value="serif">衬线 / 宋体</option></select></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">文件树字号（px）</span><input type="number" data-typography="treeFontSize" aria-label="文件树字号（px）" min="12" max="16" step="1"></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">源码字体</span><select data-typography="editorFont" aria-label="源码字体"><option value="system">系统无衬线</option><option value="mono">等宽字体</option><option value="serif">衬线 / 宋体</option></select></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">预览字体</span><select data-typography="previewFont" aria-label="预览字体"><option value="system">系统无衬线</option><option value="mono">等宽字体</option><option value="serif">衬线 / 宋体</option></select></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">源码字号（px）</span><input type="number" data-typography="editorFontSize" aria-label="源码字号（px）" min="12" max="24" step="1"></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">预览字号（px）</span><input type="number" data-typography="previewFontSize" aria-label="预览字号（px）" min="12" max="28" step="1"></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">源码行距</span><input type="number" data-typography="editorLineHeight" aria-label="源码行距" min="1.2" max="2.4" step="0.05"></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">预览行距</span><input type="number" data-typography="previewLineHeight" aria-label="预览行距" min="1.2" max="2.4" step="0.05"></label>
+<label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">阅读宽度（px）</span><input type="number" data-typography="previewWidth" aria-label="阅读宽度（px）" min="480" max="1400" step="40"></label>
           <div class="appearance-media-row icon-setting-row" data-settings-group="appearance" hidden>
             <div class="appearance-media-copy">
               <span class="appearance-label">软件图标</span>
@@ -209,7 +253,7 @@
               <button type="button" id="clear-app-icon-btn" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>恢复</button>
             </div>
           </div>
-          <div class="appearance-media-row icon-setting-row" data-settings-group="appearance" hidden>
+          <div class="appearance-media-row icon-setting-row settings-win-only" data-settings-group="appearance" hidden>
             <div class="appearance-media-copy">
               <span class="appearance-label">Markdown 文件图标</span>
               <span id="file-icon-name" class="appearance-value" title="使用内置 Markdown 文件图标">使用内置图标</span>
@@ -222,22 +266,27 @@
           </div>
           <div class="appearance-media-row" data-settings-group="appearance" hidden>
             <div class="appearance-media-copy">
-              <span class="appearance-label">背景素材</span>
+              <span class="appearance-label" title="本地文件与壁纸库共用一个背景；新选择成功后替换旧背景。">当前壁纸</span>
               <span id="background-file-name" class="appearance-value" title="未选择背景素材">未选择</span>
             </div>
             <div class="appearance-media-actions">
               <button type="button" id="choose-background-btn">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6l2 2h8v10H4V6zm2 3v7h12v-6h-7l-2-2H6v1z" fill="currentColor"/></svg>
-                选择
+                选择本地文件
               </button>
               <button type="button" id="clear-background-btn" disabled>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 清除
               </button>
             </div>
-            <input id="background-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm" hidden />
+            <input id="background-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,video/mp4,video/webm,.m4v" hidden />
           </div>
 
+          <div class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">壁纸玻璃预设</span><span class="button-row"><button type="button" class="settings-action" data-glass-preset="clear">清晰</button><button type="button" class="settings-action" data-glass-preset="soft">柔和</button><button type="button" class="settings-action" data-glass-preset="glass">通透</button></span></div>
+          <label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">壁纸玻璃模糊（px）</span><input type="number" data-typography="wallpaperBlur" min="0" max="30" step="1" aria-label="壁纸玻璃模糊"></label>
+          <label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">壁纸压暗（%）</span><input type="number" data-typography="wallpaperDim" min="0" max="60" step="5" aria-label="壁纸压暗"></label>
+          <label class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">窗口失焦暂停动态壁纸</span><input type="checkbox" id="wallpaper-pause-on-blur"></label>
+          <div class="appearance-control" data-settings-group="appearance" hidden><span class="appearance-label">动态壁纸（静音）</span><button type="button" id="wallpaper-play-btn" class="settings-action" disabled>暂停</button></div>
           <label class="appearance-control" for="background-color-input" data-settings-group="appearance" hidden>
             <span class="appearance-label">背景底色</span>
             <input id="background-color-input" class="color-swatch" type="color" value="#e7e7e7" />
@@ -386,7 +435,7 @@
               <div class="setting-row settings-win-only"><span><strong>Markdown 文件关联</strong><span>.md 文件可使用 MarkFlow 打开。</span></span><button type="button" class="settings-action primary" data-setting="open-with">启用</button></div>
               <div class="setting-row settings-win-only"><span><strong>上下文菜单新建 Markdown</strong><span>在文件夹空白处打开上下文菜单时显示“新建 Markdown 文件”。</span></span><button type="button" class="settings-action" data-setting="open-with">启用</button></div>
               <div class="setting-row settings-win-only"><span><strong>默认打开方式</strong><span>设置 MarkFlow 为 .md 文件的默认程序。</span></span><span class="button-row"><button type="button" class="settings-action primary" data-setting="default-app">设为默认</button><button type="button" class="settings-action" data-setting="default-app">打开系统设置</button></span></div>
-              <div class="setting-row" id="mac-md-association-row" hidden><span><strong>Markdown 文件关联</strong><span>在 Finder 中右键 .md 文件，通过“打开方式 → 其他”选择 MarkFlow。</span></span><button type="button" class="settings-action" data-setting="default-app">打开系统设置</button></div>
+              <div class="setting-row" id="mac-md-association-row" hidden><span><strong>Markdown 文件关联</strong><span>在 Finder 中选中文件，按 ⌘I 显示简介，在“打开方式”中选择 MarkFlow，再点“全部更改”。</span></span><button type="button" class="settings-action" data-setting="default-app">打开系统设置</button></div>
               <div class="setting-row"><span><strong>应用更新</strong><span>主动获取最新版本并查看下载状态。</span></span><span class="button-row"><span id="update-check-status" class="integration-status" aria-live="polite"></span><button type="button" id="check-updates-btn" class="settings-action"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>检查更新</button></span></div>
               <div class="setting-row"><span><strong>诊断日志</strong><span>导出本次会话的关键操作、内存限制提示与错误记录。</span></span><button type="button" id="export-logs-btn" class="settings-action">导出日志</button></div>
             </div>
@@ -426,7 +475,32 @@
       </footer>
     </dialog>
 
+    <dialog id="wallpaper-dialog" class="wallpaper-dialog" aria-labelledby="wallpaper-title">
+      <header><div><h2 id="wallpaper-title">壁纸与参数</h2><p>新壁纸加载成功后替换当前背景，并清除旧上传素材；右侧显示壁纸自带的参数。</p></div><button type="button" id="wallpaper-close-btn" aria-label="关闭壁纸库">关闭</button></header>
+      <div class="wallpaper-tools"><button type="button" data-wallpaper-scan="auto">自动发现 Steam</button><button type="button" data-wallpaper-scan="choose">选择目录</button><button type="button" data-wallpaper-scan="refresh">刷新</button><input id="wallpaper-search" type="search" placeholder="搜索壁纸名称" aria-label="搜索壁纸名称"><select id="wallpaper-filter" aria-label="壁纸类型"><option value="">全部类型</option><option value="image">图片</option><option value="video">视频</option><option value="scene">场景</option><option value="web">网页</option><option value="unavailable">不可用项目</option></select></div>
+      <p id="wallpaper-location" class="wallpaper-location">未选择目录</p>
+      <div class="wallpaper-content"><div id="wallpaper-grid" class="wallpaper-grid" aria-label="壁纸列表"></div><aside class="wallpaper-property-panel" aria-label="壁纸自带参数"><strong id="wallpaper-property-title">壁纸参数</strong><p id="wallpaper-property-note">选择壁纸后显示它的参数。</p><div class="wallpaper-property-tools"><input type="search" id="wallpaper-property-search" placeholder="搜索参数" aria-label="搜索壁纸参数"><button type="button" id="wallpaper-properties-reset">恢复默认</button></div><div id="wallpaper-properties"></div></aside></div>
+      <footer><span id="wallpaper-status" role="status">选择壁纸即可应用；不会修改原始文件。</span><span class="button-row" aria-label="壁纸玻璃预设"><span>玻璃样式</span><button type="button" data-glass-preset="clear">清晰</button><button type="button" data-glass-preset="soft">柔和</button><button type="button" data-glass-preset="glass">通透</button></span></footer>
+    </dialog>
+    <dialog id="text-style-dialog" class="text-style-dialog" aria-labelledby="text-style-title">
+      <form method="dialog">
+        <h2 id="text-style-title">所选文字样式</h2>
+        <label>文字颜色 <input id="selection-color" type="color" value="#2563eb"><button type="button" data-apply-style="color">应用</button></label>
+        <label>高亮底色 <input id="selection-highlight" type="color" value="#fff2a8"><button type="button" data-apply-style="highlight">应用</button></label>
+        <label>字号（px） <select id="selection-size"><option>12</option><option>14</option><option selected>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option></select><button type="button" data-apply-style="size">应用</button></label>
+        <p>样式会写入文档，并保留在 HTML、PDF 和 Word 导出中。</p>
+        <footer><button value="cancel">关闭</button></footer>
+      </form>
+    </dialog>
     <div id="editor-context-menu" class="editor-context-menu" role="menu" aria-label="编辑器上下文菜单" hidden>
+      <div class="context-format-bar" role="group" aria-label="文字样式">
+        <button type="button" data-text-format="bold" title="加粗" aria-label="加粗"><b>B</b></button>
+        <button type="button" data-text-format="italic" title="斜体" aria-label="斜体"><i>I</i></button>
+        <button type="button" data-text-format="underline" title="下划线" aria-label="下划线"><u>U</u></button>
+        <button type="button" data-text-format="strike" title="删除线" aria-label="删除线"><s>S</s></button>
+      </div>
+      <button type="button" data-text-format="custom" role="menuitem">文字颜色、底色与字号…</button>
+      <div class="context-menu-separator" role="separator"></div>
       <button type="button" data-context-action="copy" role="menuitem">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         复制

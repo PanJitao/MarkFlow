@@ -1,0 +1,404 @@
+{
+  "tools": [
+    {
+      "name": "pet_get_schema",
+      "operation": "schema",
+      "description": "Get the pet package JSON Schema, parameters and a minimal manifest. No app connection or image generation is needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_prepare_generation",
+      "operation": "generation",
+      "description": "Prepare a generation brief and exact asset requirements for your own image/video tool. This tool does not generate image pixels or call an AI provider.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "image",
+              "sprite",
+              "clips"
+            ]
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_list",
+      "operation": "list",
+      "description": "List installed pets and saved settings. MarkFlow must be running with AI control enabled.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_get_state",
+      "operation": "current",
+      "description": "Read the active pet, supported actions, settings and the latest queued command. Does not read notes or todos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_validate_pack",
+      "operation": "validate",
+      "description": "Validate pet.json and all referenced media, dimensions and paths without installing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute local file path. For a package, select pet.json or its containing folder."
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_install_pack",
+      "operation": "install",
+      "description": "Install a validated local pet package. Existing IDs are never overwritten. Then use pet_configure to activate it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute local file path. For a package, select pet.json or its containing folder."
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_create_from_image",
+      "operation": "from_image",
+      "description": "Create and install a pet from a local PNG/WebP/GIF/JPG image or PNG/WebP sprite sheet. A static first-frame poster is generated. Then activate with pet_configure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute local file path. For a package, select pet.json or its containing folder."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "sprite": {
+            "type": "object",
+            "properties": {
+              "columns": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              },
+              "rows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              },
+              "frames": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1024
+              },
+              "fps": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 60
+              }
+            },
+            "required": [
+              "columns",
+              "rows",
+              "frames",
+              "fps"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_configure",
+      "operation": "configure",
+      "description": "Apply a partial settings update to a pet and optionally activate it. Speed controls video and sprite playback; GIF/WebP animations retain their authored speed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "scale": {
+                "type": "number",
+                "minimum": 0.5,
+                "maximum": 1.5
+              },
+              "opacity": {
+                "type": "number",
+                "minimum": 0.3,
+                "maximum": 1
+              },
+              "speed": {
+                "type": "number",
+                "minimum": 0.5,
+                "maximum": 2
+              },
+              "flip": {
+                "type": "boolean"
+              },
+              "bubbleColor": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              },
+              "idleChat": {
+                "type": "boolean"
+              },
+              "greeting": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "activate": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_show",
+      "operation": "show",
+      "description": "Enable the desktop pet and show it without hiding the editor or opening notes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_say",
+      "operation": "perform",
+      "description": "Queue a plain-text speech bubble with an optional action. Todo reminders take priority; queued speech expires after 30 seconds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "pet_play",
+      "operation": "perform",
+      "description": "Queue an action supported by the active pet. Query pet_get_state first. Todo reminders take priority.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "settingsSchema": {
+    "type": "object",
+    "properties": {
+      "scale": {
+        "type": "number",
+        "minimum": 0.5,
+        "maximum": 1.5
+      },
+      "opacity": {
+        "type": "number",
+        "minimum": 0.3,
+        "maximum": 1
+      },
+      "speed": {
+        "type": "number",
+        "minimum": 0.5,
+        "maximum": 2
+      },
+      "flip": {
+        "type": "boolean"
+      },
+      "bubbleColor": {
+        "type": "string",
+        "pattern": "^#[0-9a-fA-F]{6}$"
+      },
+      "idleChat": {
+        "type": "boolean"
+      },
+      "greeting": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  },
+  "template": {
+    "version": 1,
+    "id": "my-pet",
+    "name": "我的宠物",
+    "canvas": {
+      "width": 512,
+      "height": 512
+    },
+    "hitBox": {
+      "x": 0.1,
+      "y": 0.05,
+      "width": 0.8,
+      "height": 0.9
+    },
+    "poster": "poster.png",
+    "clips": {
+      "idle": {
+        "file": "idle.webp",
+        "durationMs": 3000
+      }
+    },
+    "actions": {
+      "idle": [
+        "idle"
+      ]
+    },
+    "phrases": {
+      "greeting": "你好，我来陪你工作。",
+      "tap": [
+        "我在呢。"
+      ]
+    }
+  }
+}

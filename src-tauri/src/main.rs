@@ -1,6 +1,12 @@
 // 防止 release 模式下弹出黑色控制台窗口（仅 Windows 生效，其它平台忽略）
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod wallpaper;
+mod wallpaper_player;
+mod desktop_notes;
+mod pets;
+mod pet_mcp;
+
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use tauri::ipc::Response;
 use tauri::Manager;
 
@@ -16,6 +23,8 @@ const APP_NAME: &str = "MarkFlow.exe";
 const MD_EXTS: &[&str] = &[".md", ".markdown", ".mdown"];
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+#[derive(Default)]
+struct LaunchFiles(Mutex<HashMap<String, String>>);
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
 #[cfg(windows)]
@@ -451,20 +460,37 @@ fn resolve_relative_path(from_file: String, relative: String) -> Result<String, 
 
 #[tauri::command]
 async fn new_window(app: tauri::AppHandle) -> Result<(), String> {
+    create_document_window(&app, None)
+}
+
+fn create_document_window(app: &tauri::AppHandle, file: Option<String>) -> Result<(), String> {
     let label = format!("document-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
-    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App("index.html".into()))
+    if let Some(file) = file {
+        app.state::<LaunchFiles>().0.lock().unwrap().insert(label.clone(), file);
+    }
+    let result = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("index.html".into()))
         .title("MarkFlow 文档转换工作台")
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
         .decorations(cfg!(target_os = "macos"))
         .build()
         .map(|_| ())
-        .map_err(|e| format!("新建窗口失败：{e}"))
+        .map_err(|e| format!("新建窗口失败：{e}"));
+    if result.is_err() {
+        app.state::<LaunchFiles>().0.lock().unwrap().remove(&label);
+    }
+    result
 }
 
 /// 启动时传入的文件路径（通过双击 / 右键打开时由系统传入 argv）
 #[tauri::command]
-fn get_launch_file() -> Option<String> {
+fn get_launch_file(window: tauri::WebviewWindow, files: tauri::State<LaunchFiles>) -> Option<String> {
+    if let Some(file) = files.0.lock().unwrap().remove(window.label()) {
+        return Some(file);
+    }
+    if window.label() != "main" {
+        return None;
+    }
     std::env::args()
         .skip(1)
         .find(|a| MD_EXTS.iter().any(|ext| a.to_lowercase().ends_with(ext)))
@@ -1548,6 +1574,27 @@ mod tests {
     }
 
     #[test]
+    fn spreadsheet_presentation_and_pdf_fixtures_convert() {
+        let directory = test_directory("multi-format");
+        fs::create_dir_all(&directory).unwrap();
+        let fixtures: &[(&str, &[u8], &[&str])] = &[
+            ("table.xlsx", include_bytes!("../tests/fixtures/table.xlsx"), &["张三", "李四", "90", "|"]),
+            ("slides.pptx", include_bytes!("../tests/fixtures/slides.pptx"), &["中文演示标题", "演示正文", "MarkFlow"]),
+            ("text.pdf", include_bytes!("../tests/fixtures/text.pdf"), &["MarkFlow", "conversion"]),
+        ];
+        for (name, bytes, expected) in fixtures {
+            let file = directory.join(name);
+            fs::write(&file, bytes).unwrap();
+            let result = convert_office_to_markdown_blocking(file.to_string_lossy().to_string(), None, None)
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            for text in *expected {
+                assert!(result.markdown.contains(text), "{name}: missing {text}: {}", result.markdown);
+            }
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn unsupported_file_reports_friendly_code() {
         let directory = test_directory("unsupported");
         fs::create_dir_all(&directory).unwrap();
@@ -1793,17 +1840,47 @@ mod tests {
 
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--pet-mcp") {
+        if let Err(error) = pet_mcp::data_directory(&args).and_then(pet_mcp::run_stdio) { eprintln!("{error}"); std::process::exit(1); }
+        return;
+    }
     tauri::Builder::default()
+        .manage(wallpaper_player::Players::default())
+        .register_uri_scheme_protocol("wallpaper", |context, request| wallpaper_player::respond(context.app_handle(), request))
+        .register_uri_scheme_protocol("wallpaper-media", |context, request| wallpaper_player::respond(context.app_handle(), request))
+        .manage(LaunchFiles::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            app.manage(desktop_notes::DesktopStore::open(app.path().app_data_dir()?));
+            app.manage(pets::PetStore::open(app.path().app_data_dir()?));
             if let Some(main_window) = app.get_webview_window("main") {
                 main_window.set_decorations(cfg!(target_os = "macos"))?;
             }
+            desktop_notes::start(app.handle());
+            pet_mcp::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            pets::pet_request,
+            pets::pet_read_asset,
+            pets::pet_resize,
+            desktop_notes::desktop_get,
+            desktop_notes::desktop_save_note,
+            desktop_notes::desktop_delete_note,
+            desktop_notes::desktop_save_todo,
+            desktop_notes::desktop_delete_todo,
+            desktop_notes::desktop_set_done,
+            desktop_notes::desktop_resolve_alert,
+            desktop_notes::desktop_action,
+            desktop_notes::desktop_save_position,
+            wallpaper::scan_wallpapers,
+            wallpaper::authorize_wallpaper_media,
+            wallpaper::get_wallpaper_project,
+            wallpaper_player::open_wallpaper_player,
+            wallpaper_player::close_wallpaper_player,
             read_text_file,
             path_exists,
             directory_exists,
@@ -1835,6 +1912,23 @@ fn main() {
             open_url,
             convert_office_to_markdown,
         ])
-        .run(tauri::generate_context!())
-        .expect("运行 MarkFlow 时出错");
+        .build(tauri::generate_context!())
+        .expect("运行 MarkFlow 时出错")
+        .run(|_app, _event| {
+            // Finder sends URLs, not argv, both at launch and while the app is running.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                for url in urls {
+                    if let Ok(path) = url.to_file_path() {
+                        let file = path.to_string_lossy().to_string();
+                        if path.is_file() && MD_EXTS.iter().any(|ext| file.to_lowercase().ends_with(ext)) {
+                            // Each URL gets its own window; never replace an unsaved document.
+                            if let Err(error) = create_document_window(_app, Some(file)) {
+                                eprintln!("{error}");
+                            }
+                        }
+                    }
+                }
+            }
+        });
 }

@@ -1,6 +1,25 @@
 export type ThemeMode = 'light' | 'dark' | 'system'
 
+export const FONT_FAMILIES = {
+  system: '-apple-system, BlinkMacSystemFont, Segoe UI, Microsoft YaHei, sans-serif',
+  mono: 'Cascadia Code, SFMono-Regular, Menlo, Consolas, monospace',
+  serif: 'Georgia, Songti SC, SimSun, serif',
+}
+export type FontChoice = keyof typeof FONT_FAMILIES
+
 export interface AppearanceSettings {
+  treeFont: FontChoice
+  treeFontSize: number
+  editorFont: FontChoice
+  previewFont: FontChoice
+  editorFontSize: number
+  previewFontSize: number
+  editorLineHeight: number
+  previewLineHeight: number
+  previewWidth: number
+  wallpaperBlur: number
+  wallpaperDim: number
+  wallpaperPauseOnBlur: boolean
   themeMode: ThemeMode
   backgroundColor: string
   backgroundOpacity: number
@@ -21,12 +40,26 @@ export interface AppearanceSettings {
 }
 
 export interface StoredBackgroundAsset {
-  blob: Blob
+  blob?: Blob
+  path?: string
   name: string
   type: string
+  projectPath?: string
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  treeFont: 'system',
+  treeFontSize: 13,
+  editorFont: 'mono',
+  previewFont: 'system',
+  editorFontSize: 14,
+  previewFontSize: 16,
+  editorLineHeight: 1.75,
+  previewLineHeight: 1.7,
+  previewWidth: 920,
+  wallpaperBlur: 12,
+  wallpaperDim: 15,
+  wallpaperPauseOnBlur: true,
   themeMode: 'system',
   backgroundColor: '#e7e7e7',
   backgroundOpacity: 100,
@@ -82,6 +115,18 @@ export function loadAppearanceSettings(): AppearanceSettings {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null') as Partial<AppearanceSettings> | null
     if (!saved) return { ...DEFAULT_APPEARANCE }
     return {
+      treeFont: saved.treeFont && Object.hasOwn(FONT_FAMILIES, saved.treeFont) ? saved.treeFont : 'system',
+      treeFontSize: clamp(saved.treeFontSize, 12, 16, 13),
+      editorFont: saved.editorFont && Object.hasOwn(FONT_FAMILIES, saved.editorFont) ? saved.editorFont : 'mono',
+      previewFont: saved.previewFont && Object.hasOwn(FONT_FAMILIES, saved.previewFont) ? saved.previewFont : 'system',
+      editorFontSize: clamp(saved.editorFontSize, 12, 24, 14),
+      previewFontSize: clamp(saved.previewFontSize, 12, 28, 16),
+      editorLineHeight: clamp(saved.editorLineHeight, 1.2, 2.4, 1.75),
+      previewLineHeight: clamp(saved.previewLineHeight, 1.2, 2.4, 1.7),
+      previewWidth: clamp(saved.previewWidth, 480, 1400, 920),
+      wallpaperBlur: clamp(saved.wallpaperBlur, 0, 30, 12),
+      wallpaperDim: clamp(saved.wallpaperDim, 0, 60, 15),
+      wallpaperPauseOnBlur: typeof saved.wallpaperPauseOnBlur === 'boolean' ? saved.wallpaperPauseOnBlur : true,
       themeMode: saved.themeMode === 'light' || saved.themeMode === 'dark' || saved.themeMode === 'system'
         ? saved.themeMode
         : DEFAULT_APPEARANCE.themeMode,
@@ -145,7 +190,7 @@ export async function loadBackgroundAsset(): Promise<StoredBackgroundAsset | nul
       const request = database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(BACKGROUND_KEY)
       request.onsuccess = () => {
         const value = request.result as StoredBackgroundAsset | undefined
-        resolve(value?.blob instanceof Blob ? value : null)
+        resolve(value && (value.blob instanceof Blob || typeof value.path === 'string') ? value : null)
       }
       request.onerror = () => reject(request.error || new Error('无法读取背景素材'))
     })

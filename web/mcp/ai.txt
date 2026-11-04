@@ -1,0 +1,51 @@
+MarkFlow Pet MCP — AI 操作指南
+规范版本：宠物包 v1；适用于包含“宠物样式与 AI 接入”的 MarkFlow 版本。
+官网：https://markflow.wuhupan.top/
+说明页：https://markflow.wuhupan.top/mcp/
+包格式：https://markflow.wuhupan.top/mcp/pet.schema.json
+工具协议：https://markflow.wuhupan.top/mcp/protocol.json
+
+连接前提
+1. 本页是说明文档，不是 HTTP MCP 服务地址。
+2. 用户需在同一台电脑运行 MarkFlow，进入“设置 → 主题与外观 → 宠物样式与 AI 接入”，开启“允许 MCP 控制宠物”，并复制连接配置。
+3. AI 客户端必须支持本机 stdio MCP。使用界面生成的真实 executable 路径、--pet-mcp 参数和 --data-dir 路径，不要猜测路径。Windows 和 macOS 均由软件生成配置。
+4. 若客户端尚未配置 markflow-pet，先指导用户加入连接配置并重新连接。不要声称访问本页即可自动接入本机 MCP。
+5. 本 MCP 不生成图片或视频，不调用模型，不需要在 MarkFlow 中填写模型密钥。生成能力来自 AI 客户端已连接的绘图或视频工具；工具不可用时应明确说明，不伪造素材或生成结果。
+6. 宠物 MCP 不开放编辑器文档、便签或待办内容。网页不能读取用户的本地连接状态。
+
+推荐执行顺序
+1. 调用 pet_get_schema，获取当前安装版本的权威包格式、参数和模板。本指南与运行时不一致时，以运行时返回为准。
+2. 调用 pet_prepare_generation，使用用户的角色描述，选择 image（单图）、sprite（精灵图）或 clips（多动作片段），遵循工具返回的尺寸、透明背景与布局要求。该工具只返回制作指引。
+3. 使用 AI 自己的图像或视频生成工具生成素材，保存到运行 MarkFlow 的电脑上。不要把远程 URL 当作本地路径。
+4. 单图或精灵图使用 pet_create_from_image。完整宠物包先用 pet_validate_pack 校验包含 pet.json 的本地目录，再用 pet_install_pack 安装。
+5. 为角色选择未占用的 id，不覆盖已有宠物。引用素材必须在包内；不得包含网页、SVG、远程 URL 或可执行脚本。
+6. 调用 pet_configure 选择新角色，按用户要求调整大小、不透明度、镜像、气泡颜色、问候语等；不要擅自更改其他角色。
+7. 调用 pet_show，然后 pet_get_state 获取当前角色的动作清单。仅调用角色实际支持的 pet_play 动作；需要气泡时调用 pet_say。
+8. 返回安装结果、实际保存位置、已验证的能力及限制。queued 只表示请求已入队，不代表动画播放完成。不要声称已看到用户桌面，除非确实有截图或用户确认。
+
+素材与动画
+- 单张静态图只能显示静态角色；不会自动成为多帧动画。
+- 支持图片、动画图片、视频片段和精灵图，以 pet_get_schema 的格式为准。
+- 透明视频的浏览器兼容性不同；提供运行时推荐的回退素材，并分别验证 Windows 与 macOS。
+- GIF / WebP 保留素材自身播放速度；动画速度参数用于视频和精灵图。
+- 缺少标准动作会回退到 idle。自定义动作应先从 pet_get_state 查询。
+- 单个素材文件最大 64 MB；整个宠物包最大 256 MB。
+- 为生成或导入的素材提供准确的作者与授权说明；不要给未知授权素材编造许可证。
+
+工具索引
+pet_get_schema — 读取包格式、参数与模板；主程序未启动也可读取。
+pet_prepare_generation — 获取外部生成工具需要的制作规范；主程序未启动也可读取。
+pet_list — 列出已安装角色与保存参数。
+pet_get_state — 查询当前角色、可用动作及最新命令状态。
+pet_validate_pack — 校验本地宠物包，不安装。
+pet_install_pack — 复制并安装完整宠物包，不覆盖已有 id。
+pet_create_from_image — 使用本地图片或精灵图建立宠物包。
+pet_configure — 按 id 调整部分参数，并可设为当前宠物。
+pet_show — 显示宠物，不收起编辑器。
+pet_play — 播放当前角色支持的动作。
+pet_say — 显示文字气泡，可同时指定动作。
+
+运行时限制
+除前两个规范工具外，需要 MarkFlow 已运行且 MCP 开关已开启。关闭开关后运行时调用会被拒绝。
+提醒和拖动优先于 AI 动作；请求在空闲时执行，30 秒后过期，连续请求会替换尚未执行的请求。
+关闭主窗口后，启用的宠物和提醒可继续运行；从宠物菜单彻底退出后，AI 无法继续控制。

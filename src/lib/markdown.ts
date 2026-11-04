@@ -1,6 +1,7 @@
 // Markdown 渲染：把 Markdown 源码转成可安全插入页面的 HTML
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
+import { FONT_FAMILIES, type AppearanceSettings } from './appearance.ts'
 
 const renderer = new MarkdownIt({
   html: true,
@@ -149,6 +150,7 @@ renderer.core.ruler.push('source-line-attributes', (state: any) => {
   state.tokens.forEach((token: any) => {
     if (!token.map || token.type === 'inline' || token.nesting === -1) return
     token.attrSet('data-source-line', String(token.map[0] + 1))
+    token.attrSet('data-source-end', String(token.map[1]))
   })
 })
 
@@ -178,7 +180,7 @@ renderer.renderer.rules.fence = (tokens: any, index: number, options: any, env: 
 }
 
 const SANITIZE_OPTIONS = {
-  ADD_ATTR: ['style', 'target', 'data-source-line', 'data-markflow-src', 'data-mermaid', 'loading', 'decoding'],
+  ADD_ATTR: ['style', 'target', 'data-source-line', 'data-source-end', 'data-markflow-src', 'data-mermaid', 'loading', 'decoding'],
 }
 
 function sanitizeHtml(html: string): string {
@@ -200,7 +202,7 @@ export function markdownToHtml(markdown: string): string {
 }
 
 /** 生成一份完整的、可直接打开的 HTML 文档 */
-export function buildHtmlDocument(markdown: string, title: string): string {
+export function buildHtmlDocument(markdown: string, title: string, appearance?: AppearanceSettings): string {
   const body = markdownToHtml(markdown)
   const safeTitle = escapeHtml(title)
   return [
@@ -212,7 +214,9 @@ export function buildHtmlDocument(markdown: string, title: string): string {
     `  <title>${safeTitle}</title>`,
     '  <style>',
     "    body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 40px auto; max-width: 920px; line-height: 1.7; color: #1c1917; padding: 0 24px; }",
+    `    body { font-family: ${FONT_FAMILIES[appearance?.previewFont || 'system']}; font-size: ${appearance?.previewFontSize || 16}px; line-height: ${appearance?.previewLineHeight || 1.7}; max-width: ${appearance?.previewWidth || 920}px; }`,
     '    h1, h2, h3 { color: #1f1a12; }',
+    '    @media print { body { margin: 0; padding: 0; max-width: none; } * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } pre { white-space: pre-wrap; overflow-wrap: anywhere; } img, tr { break-inside: avoid; } }',
     '    table { border-collapse: collapse; width: 100%; margin: 24px 0; }',
     '    th, td { border: 1px solid #d6d3d1; padding: 10px 12px; text-align: left; }',
     '    th { background: #f5f2ee; }',

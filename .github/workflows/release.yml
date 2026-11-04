@@ -108,8 +108,18 @@ jobs:
       - name: 安装前端依赖
         run: npm ci
 
-      - name: 类型检查
-        run: npx tsc --noEmit
+      - name: 前端构建与素材校验
+        run: |
+          npm run build
+          npm run test:pet-bundle
+
+      - name: 编辑器、壁纸与桌面宠物回归
+        run: |
+          npm run test:workbench
+          node scripts/test-selection-format.mjs
+          node scripts/test-background.mjs
+          node scripts/test-wallpaper.mjs
+          npm run test:desktop-notes
 
       - name: 转换冒烟测试
         run: node scripts/smoke-convert.mjs
@@ -117,7 +127,7 @@ jobs:
       - name: Rust 单元测试
         run: |
           output_file="$(mktemp)"
-          if ! cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | tee "$output_file"; then
+          if ! cargo test --manifest-path src-tauri/Cargo.toml --locked 2>&1 | tee "$output_file"; then
             # 编译错误尾部写入 annotation，页面 Annotations 区可直接查看
             summary="$(tail -n 80 "$output_file" | tr '\n' ' ' | cut -c1-1200)"
             echo "::error file=src-tauri/Cargo.toml::cargo test 失败：${summary}"
@@ -168,22 +178,38 @@ jobs:
           # 发布说明内联维护（GITHUB_OUTPUT 多行 heredoc 在本仓库 runner 不可靠），
           # 发版时同步更新此处与 .github/release-notes/<version>.md。
           releaseBody: |
-            ## MarkFlow ${{ needs.release_metadata.outputs.version }}
+            ## MarkFlow 0.4.5
 
-            ### 修复
+            ### 编辑与外观
 
-            - 修复 Mermaid 流程图、状态图、时序图、类图不出图的问题：这些图表此前会静默显示为源码，既不成图也不报错。原因是图表源码经由 HTML 属性传递，而消毒器会丢弃含 `-->`、`--!>`、`]>` 的属性值，正好命中上述图表的箭头写法；思维导图与甘特图不含这些符号，所以看起来像是「部分图表能用」。现在源码不再经过属性传递。
-            - 修复图表语法出错时残留隐藏节点导致预览越用越慢：预览是边输入边渲染的，此前每次渲染失败都会在页面上留下一个不可见的临时节点且不会回收。
-            - 图表语法出错时保留原始源码：此前错误提示会覆盖掉图表源码，现在源码照常显示，错误原因单独一行提示。
-            - 修复「新建窗口」会改掉主窗口界面布局的问题：多个窗口共用同一份本地存储，此前在新窗口里收起编辑区或文件树、拖动分栏或调整文件树宽度，都会写回并覆盖主窗口下次启动要恢复的布局，表现为「布局有时记不住」。现在独立窗口仍沿用主窗口布局，但不再回写。
+            - 更新编辑器字体、文件树、工具栏、查找替换与命令面板，快捷键遵循 Windows Ctrl / macOS Cmd 的习惯。
+            - 源码区和预览区都可选中文字，通过右键设置加粗、斜体、删除线、颜色和高亮；完善 HTML、Word 导出与 PDF 打印流程。
+            - 主题与外观集中管理字体、颜色、背景、透明度和玻璃效果。支持本地图片、视频以及 Wallpaper Engine 壁纸库，按壁纸配置显示可调参数；选择库内壁纸会清空并替换本地上传背景。
 
-            ### 新功能
+            ### 桌面便签与自定义宠物
 
-            - 编辑器右键菜单新增「插入图表」：流程图、时序图、状态图、类图、思维导图、甘特图、饼图、ER 图，选中后插入可直接成图的图表骨架，插入时自动选中图表正文便于替换内容。
+            - 新增便签模式、待办和桌面宠物气泡提醒，可选择准时、提前 15 / 30 / 60 分钟或自定义时间。
+            - 关闭编辑器后，已启用的宠物和提醒继续运行；可从宠物菜单彻底退出。
+            - 支持导入图片、动画、精灵图与宠物包，独立调整大小、透明度、镜像、动画速度、气泡颜色和问候语。
+            - 内置 15 段角色动画。安装包只携带目标平台需要的素材格式，减少 Windows 安装包体积，同时保留动作和授权文件。
 
-            ### 其他改动
+            ### AI 接入与官网
 
-            - 补充 Mermaid 箭头语法的回归测试，覆盖流程图、状态图、时序图、类图四种写法。
+            - 新增本机 stdio 宠物 MCP，提供 11 个工具，用于读取规范、准备生成要求、校验和安装宠物、调整参数、播放动作及显示气泡。
+            - 由外部 AI 的绘图或动画工具生成素材；MarkFlow 不要求填写模型密钥。开启 MCP 控制并保持软件运行后方可控制宠物，接口不读取编辑器文档或便签待办。
+            - 官网更新真实高清截图，新增 [MCP 说明与可复制指令](https://markflow.wuhupan.top/mcp/)、[AI 指南](https://markflow.wuhupan.top/mcp/ai.txt) 和 [宠物包规范](https://markflow.wuhupan.top/mcp/pet.schema.json)。
+
+            ### 内置角色来源与作者
+
+            - 蓝发角色与动画来自 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，项目作者：[PC2005-cloud](https://github.com/PC2005-cloud)。
+            - 采用 MIT 许可，保留 `Copyright (c) 2026 PC2005-cloud`。安装包包含原始 `LICENSE.txt`、`NOTICE.txt` 与素材来源版本；WebP / PNG 为适配平台所做的格式转换。
+            - 软件宠物设置、官网与本发布说明均明确显示项目来源和作者。
+
+            ### 平台说明
+
+            - Windows x64 提供 NSIS 安装包和 Tauri 更新签名。
+            - macOS Apple Silicon / Intel 提供预览构建，尚未完成 Apple Developer ID 签名、公证和 Mac 真机验证；CI 编译通过不代表已完成这些检查。
+            - 复杂文档转换可能改变原始版式，扫描件需先完成 OCR；Wallpaper Engine 网页或场景效果取决于素材和平台兼容性。
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} ${{ matrix.args }}

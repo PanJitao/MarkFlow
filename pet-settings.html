@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>宠物样式与 AI 接入</title></head>
+<body class="pet-settings-page">
+  <header class="pet-settings-header"><div><h1>宠物样式</h1><p>选择角色、导入自己的素材，或让 AI 为你制作宠物。</p></div><button id="refresh-library">刷新</button></header>
+  <main class="pet-settings-content">
+    <div class="library-toolbar"><button id="import-pet" class="primary">导入素材</button><span>图片，或宠物包中的 pet.json</span><button id="export-template">保存模板</button></div>
+    <div class="pet-settings-grid">
+      <section class="pet-library-panel" aria-label="宠物库"><label for="pet-library">已安装的宠物</label><select id="pet-library" size="5" aria-label="已安装的宠物"></select><button id="remove-pet" disabled>移到回收站</button><p id="library-warnings" class="pet-warning" hidden></p></section>
+      <section aria-label="宠物预览与参数">
+        <div id="pet-preview-box"><div id="settings-pet-stage" class="pet-stage"><img id="settings-pet-poster" src="./pets/dsh-blue/poster.png" alt="宠物预览" draggable="false"></div></div>
+        <div class="pet-preview-actions"><select id="preview-action" aria-label="预览动作"></select><button id="play-preview">播放预览</button><span id="active-pet-label"></span></div>
+        <p id="pet-description"></p><p id="pet-attribution"></p>
+        <form id="pet-parameters">
+          <div class="pet-parameter-grid">
+            <label>大小 <output id="scale-value"></output><input id="pet-scale" aria-label="宠物大小" type="range" min="0.5" max="1.5" step="0.05" value="1"></label>
+            <label>不透明度 <output id="opacity-value"></output><input id="pet-opacity" aria-label="宠物不透明度" type="range" min="0.3" max="1" step="0.05" value="1"></label>
+            <label>动画速度 <output id="speed-value"></output><input id="pet-speed" aria-label="动画速度" type="range" min="0.5" max="2" step="0.1" value="1"></label>
+            <label class="pet-color-label">气泡颜色<input id="pet-bubble" type="color" aria-label="气泡颜色" value="#fcfdff"></label>
+          </div>
+          <p class="pet-settings-hint">速度适用于视频和精灵图；GIF / WebP 动画保留素材原速度。</p>
+          <div class="pet-checks"><label><input id="pet-flip" type="checkbox">左右镜像</label><label><input id="pet-chat" type="checkbox" checked>闲时主动说话</label></div>
+          <label class="pet-greeting">问候语<input id="pet-greeting" type="text" maxlength="300" placeholder="留空使用宠物包的文案"></label>
+          <div class="pet-save-actions"><button type="submit" class="primary" id="apply-pet">应用到桌面</button><button type="button" id="reset-pet">恢复参数</button></div>
+        </form>
+      </section>
+    </div>
+    <section class="pet-mcp-section" aria-labelledby="mcp-heading">
+      <div class="pet-mcp-heading"><h2 id="mcp-heading">AI 接入 · MCP</h2><label><input id="allow-mcp" type="checkbox">允许 MCP 控制宠物</label></div>
+      <p>把连接配置加入 AI 客户端。让 AI 获取模板、调用自己的绘图工具生成素材，再安装、切换宠物并控制动作和气泡。</p>
+      <p class="pet-settings-hint">接入时保持 MarkFlow 运行。无需在这里填写模型密钥；MCP 只开放宠物功能，不读取编辑器文档或待办。</p>
+      <div class="mcp-config-actions"><button id="copy-mcp">复制连接配置</button><button id="save-mcp">保存配置文件</button><button id="copy-generation">复制生成指令</button></div>
+      <details><summary>查看配置与开放接口</summary><textarea id="mcp-config" readonly spellcheck="false" aria-label="MCP 连接配置"></textarea><ul id="mcp-tools"></ul></details>
+      <p id="mcp-activity" aria-live="polite">尚无 AI 调用</p>
+    </section>
+  </main>
+  <footer id="pet-settings-status" role="status" aria-live="polite">正在读取宠物库…</footer>
+  <script type="module" src="/src/pet-settings.ts"></script>
+</body></html>

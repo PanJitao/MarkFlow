@@ -1,6 +1,7 @@
 // 文档格式互转：办公文档导入（Word/Excel/PPT/PDF 等 → Markdown）由 Rust 端 anydoc 引擎完成，
 // 这里保留 Markdown 端的能力：Markdown → Word 导出（Base64 图片外置化见 externalize-image.ts）。
 import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
 import { recoverBrokenBold } from './markdown.ts'
 import {
   Document,
@@ -239,136 +240,55 @@ function buildDocxTable(tableLines: string[]): Table {
 
 // 行内解析：用 markdown-it 的 token 流，正确处理链接 / 嵌套加粗斜体 / 代码 / 删除线
 function parseInlineRuns(text: string): (TextRun | ExternalHyperlink)[] {
-  // 先做加粗闭合恢复（parseInline 不经过 core 规则），保证「**数据库：**MySQL」也能导出为加粗
-  const recovered = recoverBrokenBold(text)
-  if (!recovered.includes('<strong') && !recovered.includes('<em')) {
-    return parseInlineRunsPlain(recovered, {})
-  }
-  // 恢复产生的 <strong>/<em> 会被 markdown-it 拆成独立标签 token，
-  // 这里按标签切段分别解析，再把样式叠加到各段上
+  const root = document.createElement('div')
+  root.innerHTML = DOMPurify.sanitize(inlineMd.renderInline(recoverBrokenBold(text)))
+  return domInlineRuns(root, {})
+}
+
+function wordColor(value: string): string | undefined {
+  if (/^#[0-9a-f]{6}$/i.test(value)) return value.slice(1)
+  const rgb = /^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)$/.exec(value)
+  if (rgb) return rgb.slice(1).map((part) => Number(part).toString(16).padStart(2, '0')).join('')
+  return undefined
+}
+
+function domInlineRuns(root: Node, inherited: Record<string, any>): (TextRun | ExternalHyperlink)[] {
   const runs: (TextRun | ExternalHyperlink)[] = []
-  const stack: string[] = []
-  let previous = 0
-  const pattern = /<(\/?)(strong|em)>/g
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(recovered)) !== null) {
-    const segment = recovered.slice(previous, match.index)
-    previous = pattern.lastIndex
-    if (segment) runs.push(...parseInlineRunsPlain(segment, styleFromTagStack(stack)))
-    if (match[1]) {
-      const index = stack.lastIndexOf(match[2])
-      if (index !== -1) stack.splice(index, 1)
-    } else {
-      stack.push(match[2])
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType === 3) {
+      runs.push(new TextRun({ text: child.textContent || '', ...inherited }))
+      continue
     }
+    if (child.nodeType !== 1) continue
+    const element = child as HTMLElement
+    const tag = element.tagName.toLowerCase()
+    const style = { ...inherited }
+    if (tag === 'strong' || tag === 'b') style.bold = true
+    if (tag === 'em' || tag === 'i') style.italics = true
+    if (tag === 'u') style.underline = {}
+    if (tag === 's' || tag === 'del') style.strike = true
+    if (tag === 'code') style.font = 'Consolas'
+    if (tag === 'sup') style.superScript = true
+    if (tag === 'sub') style.subScript = true
+    const css = element.style
+    const color = wordColor(css.color)
+    const fill = wordColor(css.backgroundColor)
+    if (color) style.color = color
+    if (fill) style.shading = { fill }
+    if (/^\d+(?:\.\d+)?px$/.test(css.fontSize)) style.size = Math.round(parseFloat(css.fontSize) * 1.5)
+    if (css.fontWeight === 'bold' || Number(css.fontWeight) >= 600) style.bold = true
+    if (css.fontStyle === 'italic') style.italics = true
+    if (css.textDecoration.includes('underline')) style.underline = {}
+    if (css.textDecoration.includes('line-through')) style.strike = true
+    if (tag === 'br') runs.push(new TextRun({ text: '', break: 1, ...style }))
+    else if (tag === 'img') runs.push(new TextRun({ text: `[图片：${element.getAttribute('alt') || '图片'}]`, ...style }))
+    else if (tag === 'a') runs.push(new ExternalHyperlink({
+      link: element.getAttribute('href') || '',
+      children: domInlineRuns(element, { color: '1155CC', ...style }),
+    }))
+    else runs.push(...domInlineRuns(element, style))
   }
-  const tail = recovered.slice(previous)
-  if (tail) runs.push(...parseInlineRunsPlain(tail, styleFromTagStack(stack)))
-  return runs.length ? runs : [new TextRun(text)]
-}
-
-function styleFromTagStack(stack: string[]): Record<string, boolean> {
-  const style: Record<string, boolean> = {}
-  if (stack.includes('strong')) style.bold = true
-  if (stack.includes('em')) style.italics = true
-  return style
-}
-
-function parseInlineRunsPlain(text: string, baseStyle: Record<string, boolean>): (TextRun | ExternalHyperlink)[] {
-  const tokens = inlineMd.parseInline(text, {})
-  const children = tokens[0]?.children
-  if (!children || !children.length) return [new TextRun({ text, ...baseStyle })]
-  const runs: (TextRun | ExternalHyperlink)[] = []
-  inlineTokensToRuns(children, baseStyle, runs)
-  return runs.length ? runs : [new TextRun({ text, ...baseStyle })]
-}
-
-/** 递归把 markdown-it 行内 token 转成 docx TextRun / 超链接 */
-function inlineTokensToRuns(tokens: any[], style: Record<string, any>, runs: (TextRun | ExternalHyperlink)[]): void {
-  let i = 0
-  while (i < tokens.length) {
-    const t = tokens[i]
-    switch (t.type) {
-      case 'text':
-      case 'text_special':
-        runs.push(new TextRun({ text: t.content, ...style }))
-        break
-      case 'code_inline':
-        runs.push(new TextRun({ text: t.content, font: 'Consolas', ...style }))
-        break
-      case 'softbreak':
-      case 'hardbreak':
-        runs.push(new TextRun({ text: '', break: 1, ...style }))
-        break
-      case 'image': {
-        const alt = t.content || ''
-        runs.push(new TextRun({ text: alt ? `[图片：${alt}]` : '[图片]', italics: true, color: '888888', ...style }))
-        break
-      }
-      case 'strong_open':
-      case 'em_open':
-      case 's_open': {
-        const next = { ...style }
-        if (t.type === 'strong_open') next.bold = true
-        else if (t.type === 'em_open') next.italics = true
-        else next.strike = true
-        const closeType = t.type.replace('_open', '_close')
-        const inner = sliceUntilClose(tokens, i, t.type, closeType)
-        inlineTokensToRuns(inner, next, runs)
-        i += inner.length + 2 // 跳过内部 token + open/close
-        continue
-      }
-      case 'html_inline': {
-        // 加粗闭合恢复产生的 <strong>/<em>：还原为对应样式，而不是把标签当文字
-        const strongMatch = /^<strong>([\s\S]*)<\/strong>$/.exec(t.content)
-        if (strongMatch) {
-          const inner = inlineMd.parseInline(strongMatch[1], {})
-          const children = inner[0]?.children
-          if (children && children.length) inlineTokensToRuns(children, { ...style, bold: true }, runs)
-          break
-        }
-        const emMatch = /^<em>([\s\S]*)<\/em>$/.exec(t.content)
-        if (emMatch) {
-          const inner = inlineMd.parseInline(emMatch[1], {})
-          const children = inner[0]?.children
-          if (children && children.length) inlineTokensToRuns(children, { ...style, italics: true }, runs)
-          break
-        }
-        if (t.content) runs.push(new TextRun({ text: t.content, ...style }))
-        break
-      }
-      case 'link_open': {
-        const href = (t.attrGet && t.attrGet('href')) || ''
-        const inner = sliceUntilClose(tokens, i, 'link_open', 'link_close')
-        const subRuns: (TextRun | ExternalHyperlink)[] = []
-        inlineTokensToRuns(inner, { ...style, color: '1155CC' }, subRuns)
-        runs.push(new ExternalHyperlink({ link: href, children: subRuns }))
-        i += inner.length + 2
-        continue
-      }
-      default:
-        if (t.content) runs.push(new TextRun({ text: t.content, ...style }))
-    }
-    i += 1
-  }
-}
-
-/** 取出 open/close 之间的 token（含嵌套），返回内部 token 数组 */
-function sliceUntilClose(tokens: any[], openIdx: number, openType: string, closeType: string): any[] {
-  const inner: any[] = []
-  let depth = 1
-  let j = openIdx + 1
-  while (j < tokens.length && depth > 0) {
-    const tj = tokens[j]
-    if (tj.type === openType) depth++
-    else if (tj.type === closeType) {
-      depth--
-      if (depth === 0) break
-    }
-    inner.push(tj)
-    j++
-  }
-  return inner
+  return runs
 }
 
 function headingLevel(level: number): (typeof HeadingLevel)[keyof typeof HeadingLevel] {

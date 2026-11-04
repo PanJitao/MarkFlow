@@ -1,0 +1,6 @@
+WebWallGL 3.0.0 (unmodified browser bundle)
+Source and distribution: https://www.npmjs.com/package/webwallgl/v/3.0.0
+Repository: https://github.com/oneincase/webwallgl
+The upstream browser bundle includes Mediabunny, licensed under MPL 2.0.
+Mediabunny source: https://github.com/Vanilagy/mediabunny
+Wallpaper artwork remains in the user-selected library and is not bundled.

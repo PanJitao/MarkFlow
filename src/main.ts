@@ -1,5 +1,12 @@
 // 主界面与交互：Markdown 源码编辑 + 实时预览 + 文件转换
 import './style.css'
+import { isMacOS, primaryModifier, shortcutLabel, normalizeComparablePath } from './lib/platform'
+import { formatSource, previewSelectionRanges, type SourceRange, type TextFormat } from './lib/selection-format'
+import { setupWallpaperLibrary } from './lib/wallpaper'
+import { mountWallpaperPlayer, type WallpaperPlayer } from './lib/wallpaper-runtime'
+import { savedWallpaperValues } from './lib/wallpaper-properties'
+import { desktopAction } from './lib/desktop-notes'
+import { setupWorkbench } from './lib/workbench'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
 import c from 'highlight.js/lib/languages/c'
@@ -26,6 +33,7 @@ import { attachLogErrorHandlers, formatLogExport, log } from './lib/log'
 import {
   clearBackgroundAsset,
   DEFAULT_APPEARANCE,
+  FONT_FAMILIES,
   loadAppearanceSettings,
   loadBackgroundAsset,
   saveAppearanceSettings,
@@ -34,6 +42,7 @@ import {
   type StoredBackgroundAsset,
 } from './lib/appearance'
 import {
+  wallpaperMediaUrl,
   pickOpenFile,
   pickFilePath,
   pickOpenFolder,
@@ -86,10 +95,8 @@ hljs.registerLanguage('powershell', powershell)
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('sql', sql)
 
-const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent) || navigator.platform.includes('Mac')
-const primaryModifierLabel = isMacOS ? 'Command' : 'Ctrl'
-const shortcutLabel = (key: string) => `${primaryModifierLabel}+${key}`
-document.documentElement.classList.toggle('platform-macos', isMacOS && isTauri())
+document.documentElement.classList.toggle('platform-macos', isMacOS)
+document.documentElement.classList.toggle('native-macos', isMacOS && isTauri())
 
 const SAMPLE = `# 欢迎使用 MarkFlow
 
@@ -211,7 +218,18 @@ const TOAST_EXIT_MS = 220
 const MAX_VISIBLE_TOASTS = 5
 let appearanceSettings = loadAppearanceSettings()
 let backgroundObjectUrl: string | null = null
+let backgroundLoad: AbortController | null = null
+let backgroundCommit: Promise<void> = Promise.resolve()
+let wallpaperManuallyPaused = false
+let wallpaperPlayer: WallpaperPlayer | null = null
+let activeWallpaper: StoredBackgroundAsset | null = null
+const wallpaperPlayBtn = document.querySelector<HTMLButtonElement>('#wallpaper-play-btn')!
+const wallpaperPauseOnBlur = document.querySelector<HTMLInputElement>('#wallpaper-pause-on-blur')!
 let faviconObjectUrl: string | null = null
+let formatRanges: SourceRange[] = []
+let formatSourceSnapshot = ''
+const textStyleDialog = document.querySelector<HTMLDialogElement>('#text-style-dialog')!
+let previewReady: Promise<void> = Promise.resolve()
 let contextSelection: { start: number; end: number } | null = null
 let pendingContextSelection: { start: number; end: number } | null = null
 let lastNonEmptySelection: { start: number; end: number } | null = null
@@ -361,7 +379,8 @@ async function restoreWorkspaceFolder(): Promise<void> {
 
 function setCurrentFile(path: string | null) {
   currentFile = path
-  fileLabel.textContent = path ?? '未保存的草稿 · Markdown 源码'
+  fileLabel.textContent = path ? fileNameFromPath(path) : '未命名.md'
+  fileLabel.title = path ?? '未保存的 Markdown 草稿'
   const title = path ? fileNameFromPath(path) : APP_WINDOW_TITLE
   document.title = title
   windowTitleEl.textContent = title
@@ -478,6 +497,7 @@ function setDocumentSaveState(state: DocumentSaveState) {
   }
   saveStateEl.dataset.state = state
   saveStateEl.textContent = labels[state]
+  fileLabel.classList.toggle('modified', state !== 'saved')
 }
 
 function updateDocumentSaveState() {
@@ -714,6 +734,19 @@ function applyAppearance(settings: AppearanceSettings) {
   const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
   const darkTheme = settings.themeMode === 'dark' || (settings.themeMode === 'system' && systemDark)
   root.dataset.theme = darkTheme ? 'dark' : 'light'
+  root.style.setProperty('--wallpaper-blur', `${settings.panelBlurEnabled ? settings.wallpaperBlur : 0}px`)
+  root.style.setProperty('--wallpaper-dim', String(settings.wallpaperDim / 100))
+  wallpaperPauseOnBlur.checked = settings.wallpaperPauseOnBlur
+  root.style.setProperty('--tree-font', FONT_FAMILIES[settings.treeFont])
+  root.style.setProperty('--editor-font', FONT_FAMILIES[settings.editorFont])
+  root.style.setProperty('--preview-font', FONT_FAMILIES[settings.previewFont])
+  for (const key of ['treeFontSize', 'editorFontSize', 'previewFontSize', 'editorLineHeight', 'previewLineHeight', 'previewWidth'] as const) {
+    const cssKey = key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
+    root.style.setProperty(`--${cssKey}`, `${settings[key]}${key.includes('LineHeight') ? '' : 'px'}`)
+  }
+  document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-typography]').forEach((input) => {
+    input.value = String(settings[input.dataset.typography as keyof AppearanceSettings])
+  })
   themeModeButtons.forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.themeMode === settings.themeMode))
   })
@@ -785,10 +818,7 @@ function applyAppearance(settings: AppearanceSettings) {
   editorColorInput.value = editorText
   previewColorInput.value = previewText
 
-  if (settings.backgroundOpacity === 0) backgroundVideo.pause()
-  else if (customBackground.classList.contains('has-video') && !document.hidden) {
-    void backgroundVideo.play().catch(() => undefined)
-  }
+  syncBackgroundPlayback()
   restartAutoSaveTimer()
   if (previousTheme && previousTheme !== root.dataset.theme) {
     // mermaid SVG 配色在渲染时固化，主题切换后需要按新主题重绘
@@ -846,6 +876,7 @@ async function restoreConfiguredIcons() {
 function updateAppearance(patch: Partial<AppearanceSettings>) {
   appearanceSettings = { ...appearanceSettings, ...patch }
   applyAppearance(appearanceSettings)
+  schedulePaneLayout()
   try {
     saveAppearanceSettings(appearanceSettings)
   } catch {
@@ -853,52 +884,101 @@ function updateAppearance(patch: Partial<AppearanceSettings>) {
   }
 }
 
-function backgroundKind(asset: Pick<StoredBackgroundAsset, 'name' | 'type'>): 'image' | 'video' | null {
+function backgroundKind(asset: Pick<StoredBackgroundAsset, 'name' | 'type'>): 'image' | 'video' | 'scene' | 'web' | null {
+  if (asset.type === 'scene/wallpaper') return 'scene'
+  if (asset.type === 'web/wallpaper') return 'web'
   const name = asset.name.toLowerCase()
-  if (asset.type.startsWith('video/') || /\.(mp4|webm)$/.test(name)) return 'video'
-  if (asset.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/.test(name)) return 'image'
+  if (asset.type.startsWith('video/') || /\.(mp4|webm|m4v)$/.test(name)) return 'video'
+  if (asset.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif)$/.test(name)) return 'image'
   return null
 }
 
-function showBackgroundAsset(asset: StoredBackgroundAsset | null) {
-  if (backgroundObjectUrl) URL.revokeObjectURL(backgroundObjectUrl)
-  backgroundObjectUrl = null
-  backgroundImage.removeAttribute('src')
-  backgroundVideo.pause()
-  backgroundVideo.removeAttribute('src')
-  backgroundVideo.load()
-  customBackground.classList.remove('has-image', 'has-video')
-
-  if (!asset) {
-    backgroundFileName.textContent = '未选择'
-    backgroundFileName.title = '未选择背景素材'
-    clearBackgroundBtn.disabled = true
-    return
-  }
-
-  const kind = backgroundKind(asset)
-  if (!kind) return
-  backgroundObjectUrl = URL.createObjectURL(asset.blob)
-  if (kind === 'video') {
-    backgroundVideo.src = backgroundObjectUrl
-    customBackground.classList.add('has-video')
-    if (appearanceSettings.backgroundOpacity > 0 && !document.hidden) {
-      void backgroundVideo.play().catch(() => undefined)
+function checkBackgroundMedia(source: string, kind: 'image' | 'video', signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted()
+  return new Promise((resolve, reject) => {
+    const media = document.createElement(kind === 'video' ? 'video' : 'img')
+    const event = kind === 'video' ? 'loadeddata' : 'load'
+    const finish = (error?: unknown) => {
+      clearTimeout(timer); signal.removeEventListener('abort', abort)
+      media.removeEventListener(event, loaded); media.removeEventListener('error', failed)
+      media.removeAttribute('src')
+      if (media instanceof HTMLVideoElement) media.load()
+      if (error) reject(error); else resolve()
     }
-  } else {
-    backgroundImage.src = backgroundObjectUrl
-    customBackground.classList.add('has-image')
+    const loaded = () => finish()
+    const failed = () => finish(new Error('壁纸无法读取或当前系统不支持该图片/视频编码，原背景已保留'))
+    const abort = () => finish(signal.reason)
+    const timer = setTimeout(() => finish(new Error('壁纸加载超时，原背景已保留')), 30000)
+    media.addEventListener(event, loaded); media.addEventListener('error', failed)
+    signal.addEventListener('abort', abort, { once: true })
+    if (media instanceof HTMLVideoElement) { media.preload = 'auto'; media.muted = true }
+    media.src = source
+  })
+}
+
+async function showBackgroundAsset(asset: StoredBackgroundAsset | null, persist = false) {
+  backgroundLoad?.abort()
+  const controller = new AbortController(); backgroundLoad = controller
+  const kind = asset ? backgroundKind(asset) : null
+  const live = kind === 'scene' || kind === 'web'
+  let nextPlayer: WallpaperPlayer | null = null
+  let nextObjectUrl: string | null = null
+  let source: string | null = null
+  try {
+    if (asset && !kind) throw new Error('不支持的壁纸格式')
+    if (live && asset?.path) {
+      nextPlayer = await mountWallpaperPlayer(asset.path, customBackground, savedWallpaperValues(asset.projectPath || asset.path), controller.signal)
+    } else if (asset && (kind === 'image' || kind === 'video')) {
+      nextObjectUrl = !asset.path && asset.blob ? URL.createObjectURL(asset.blob) : null
+      source = asset.path ? await wallpaperMediaUrl(asset.path) : nextObjectUrl
+      if (!source) throw new Error('壁纸没有可用的文件')
+      await checkBackgroundMedia(source, kind, controller.signal)
+    } else if (asset) throw new Error('壁纸没有可用的项目路径')
+    // Serialize storage and display commits, so a slower previous selection cannot
+    // overwrite a newer one. A commit already writing storage finishes atomically.
+    const commit = backgroundCommit.catch(() => {}).then(async () => {
+      controller.signal.throwIfAborted()
+      if (persist) {
+        try { if (asset) await saveBackgroundAsset(asset); else await clearBackgroundAsset() }
+        catch (error) { throw new Error(`背景保存失败，原背景已保留：${errMsg(error)}`) }
+      }
+      wallpaperPlayer?.destroy(); wallpaperPlayer = nextPlayer; nextPlayer = null
+      if (backgroundObjectUrl) URL.revokeObjectURL(backgroundObjectUrl)
+      backgroundObjectUrl = nextObjectUrl; nextObjectUrl = null
+      backgroundImage.removeAttribute('src')
+      backgroundVideo.pause(); backgroundVideo.removeAttribute('src'); backgroundVideo.load()
+      customBackground.classList.remove('has-image', 'has-video')
+      backgroundFileInput.value = ''
+      activeWallpaper = asset
+      document.documentElement.dataset.wallpaper = String(Boolean(asset))
+      wallpaperManuallyPaused = false
+      wallpaperPlayBtn.disabled = kind !== 'video' && !wallpaperPlayer
+      wallpaperPlayBtn.textContent = '暂停'; wallpaperPlayBtn.setAttribute('aria-pressed', 'false')
+      if (wallpaperPlayer) wallpaperPlayer.frame.style.zIndex = ''
+      else if (source && kind === 'video') { backgroundVideo.src = source; customBackground.classList.add('has-video') }
+      else if (source && kind === 'image') { backgroundImage.src = source; customBackground.classList.add('has-image') }
+      backgroundFileName.textContent = asset?.name || '未选择'
+      backgroundFileName.title = asset?.name || '未选择背景素材'
+      clearBackgroundBtn.disabled = !asset
+      syncBackgroundPlayback()
+      customBackground.dispatchEvent(new Event('background-change'))
+    })
+    backgroundCommit = commit
+    await commit
+  } catch (error) {
+    nextPlayer?.destroy()
+    if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl)
+    throw error
   }
-  backgroundFileName.textContent = asset.name
-  backgroundFileName.title = asset.name
-  clearBackgroundBtn.disabled = false
 }
 
 async function restoreBackground() {
+  const previousLoad = backgroundLoad
   try {
-    showBackgroundAsset(await loadBackgroundAsset())
+    const asset = await loadBackgroundAsset()
+    if (backgroundLoad === previousLoad) await showBackgroundAsset(asset)
   } catch (err) {
-    showToast(`恢复背景失败：${errMsg(err)}`, 'error')
+    if (!(err instanceof DOMException && err.name === 'AbortError')) showToast(`恢复背景失败：${errMsg(err)}`, 'error')
   }
 }
 
@@ -1094,8 +1174,11 @@ function setContentZoom(nextZoom: number) {
 
 function setMarkdown(value: string) {
   undoStack.length = 0
+  redoStack.length = 0
   markdown = value
   editor.value = value
+  editor.setSelectionRange(0, 0)
+  editor.dispatchEvent(new Event('select'))
   renderEditorLineNumbers(value)
   renderPreview(value)
   scheduleCountUpdate()
@@ -1109,6 +1192,7 @@ function renderOnly() {
   scheduleCountUpdate()
   schedulePersist()
   updateDocumentSaveState()
+  editor.dispatchEvent(new Event('select'))
   if (largePreviewTimer) clearTimeout(largePreviewTimer)
   if (editor.value.length > PREVIEW_DEBOUNCE_CHARS) {
     largePreviewTimer = setTimeout(() => {
@@ -1143,18 +1227,16 @@ function applyHistoryState(state: { value: string; start: number; end: number })
 function undoMarkdown() {
   const previous = undoStack.pop()
   if (!previous) return false
-  redoStack.push(previous)
+  redoStack.push({ value: editor.value, start: editor.selectionStart, end: editor.selectionEnd })
   applyHistoryState(previous)
-  showToast('已撤回', 'success')
   return true
 }
 
 function redoMarkdown() {
   const next = redoStack.pop()
   if (!next) return false
-  undoStack.push(next)
+  undoStack.push({ value: editor.value, start: editor.selectionStart, end: editor.selectionEnd })
   applyHistoryState(next)
-  showToast('已重做', 'success')
   return true
 }
 
@@ -1401,6 +1483,7 @@ function renderPreview(value: string) {
   preview.innerHTML = renderMarkdown(value, { mermaid: interactiveRender })
   // 巨型文档跳过表格可编辑增强与代码块高亮/复制按钮：预览保持纯静态渲染
   // （图片懒加载与本地图片解析仍生效），单次渲染成本大幅下降
+  previewReady = Promise.resolve()
   if (interactiveRender) {
     preview.querySelectorAll<HTMLTableElement>('table').forEach((table) => {
       enhancePreviewTable(table)
@@ -1419,7 +1502,7 @@ function renderPreview(value: string) {
       wrapper.append(pre, button)
     })
     // mermaid 代码块渲染成图表（异步；完成后重新校准滚动锚点）
-    void renderMermaidContainers(preview, () => schedulePreviewScrollAnchors())
+    previewReady = renderMermaidContainers(preview, () => schedulePreviewScrollAnchors())
   }
   preview.querySelectorAll<HTMLImageElement>('img').forEach((image) => {
     image.addEventListener('load', () => {
@@ -1440,12 +1523,12 @@ function bytesToDataUrl(bytes: number[], mimeType: string) {
   })
 }
 
-async function buildPortableHtml(markdownSource: string, markdownPath: string) {
-  const html = buildHtmlDocument(markdownSource, fileNameFromPath(markdownPath).replace(/\.[^.]+$/, '') || 'MarkFlow 导出文档')
+async function buildPortableHtml(markdownSource: string, markdownPath: string | null) {
+  const html = buildHtmlDocument(markdownSource, fileNameFromPath(markdownPath || '文档.md').replace(/\.[^.]+$/, '') || 'MarkFlow 导出文档', appearanceSettings)
   const documentNode = new DOMParser().parseFromString(html, 'text/html')
   for (const image of [...documentNode.querySelectorAll<HTMLImageElement>('img[src]')]) {
     const source = image.getAttribute('src') || ''
-    const path = await resolveLocalImagePath(source, markdownPath)
+    const path = markdownPath ? await resolveLocalImagePath(source, markdownPath) : null
     if (!path) continue
     try {
       const bytes = await readFileBytes(path)
@@ -1869,6 +1952,10 @@ function openEditorContextMenu(event: MouseEvent) {
     ?? currentSelection
   pendingContextSelection = null
   lastNonEmptySelection = null
+  editorContextMenu.dataset.origin = 'source'
+  formatRanges = contextSelection.start < contextSelection.end ? [{ ...contextSelection }] : []
+  formatSourceSnapshot = editor.value
+  editorContextMenu.querySelectorAll<HTMLButtonElement>('[data-text-format]').forEach((button) => { button.disabled = !formatRanges.length })
   editorContextMenu.hidden = false
   const width = editorContextMenu.offsetWidth
   const height = editorContextMenu.offsetHeight
@@ -2107,7 +2194,7 @@ async function imageDirectoryName(markdownPath: string) {
     const withoutExtension = relative.replace(/\.[^./\\]+$/, '')
     return `${withoutExtension || stem || 'document'}.assets`
   }
-  const pathBytes = new TextEncoder().encode(markdownPath.replace(/\\/g, '/').toLowerCase())
+  const pathBytes = new TextEncoder().encode(normalizeComparablePath(markdownPath))
   const digest = await crypto.subtle.digest('SHA-256', pathBytes)
   const suffix = [...new Uint8Array(digest)].slice(0, 6).map((value) => value.toString(16).padStart(2, '0')).join('')
   return `${stem || 'document'}-${suffix}.assets`
@@ -2197,21 +2284,38 @@ async function openWorkspaceFolder() {
 
 async function renderWorkspaceTree() {
   if (!workspaceRoot) {
-    workspaceLabel.textContent = '文件'
+    workspaceLabel.textContent = '资源管理器'
     workspaceLabel.title = '未打开文件夹'
     const empty = document.createElement('div')
     empty.className = 'file-tree-empty'
     empty.innerHTML = '<span class="file-tree-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span><strong>未打开文件夹</strong><span>打开一个文件夹后，文件会显示在这里。</span>'
+    const openFolder = document.createElement('button')
+    openFolder.textContent = '打开文件夹'
+    openFolder.className = 'open-folder-action'
+    openFolder.addEventListener('click', () => void openWorkspaceFolder().catch((error) => showToast(errMsg(error), 'error')))
+    empty.append(openFolder)
     fileTree.replaceChildren(empty)
     return
   }
 
   workspaceLabel.textContent = fileNameFromPath(workspaceRoot) || workspaceRoot
   workspaceLabel.title = workspaceRoot
+  const focusedPath = fileTree.contains(document.activeElement)
+    ? (document.activeElement as HTMLElement).dataset.path : null
+  const scrollTop = fileTree.scrollTop
   const fragment = document.createDocumentFragment()
   try {
     await appendTreeEntries(fragment, workspaceRoot, 0)
+    if (!fragment.childNodes.length) {
+      const empty = document.createElement('p')
+      empty.className = 'file-tree-empty'
+      empty.textContent = '此文件夹为空，可右键新建文件或文件夹。'
+      fragment.append(empty)
+    }
     fileTree.replaceChildren(fragment)
+    if (focusedPath) [...fileTree.querySelectorAll<HTMLButtonElement>('.file-tree-row')]
+      .find((row) => row.dataset.path === focusedPath)?.focus({ preventScroll: true })
+    fileTree.scrollTop = scrollTop
     persistExpandedTreeDirs()
   } catch (error) {
     fileTree.replaceChildren(Object.assign(document.createElement('p'), {
@@ -2221,16 +2325,28 @@ async function renderWorkspaceTree() {
   }
 }
 
+const treeNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+const TREE_ICONS = {
+  folder: '<path d="M1.5 4V2.5h5l1.5 2h6.5v9h-13z"/>',
+  markdown: '<rect x="1" y="3" width="14" height="10" rx="1"/><path d="M3 10V6l2 2 2-2v4m4-4v4m-1.5-1.5L11 10l1.5-1.5"/>',
+  image: '<rect x="1.5" y="1.5" width="13" height="13" rx="1"/><circle cx="5" cy="5" r="1"/><path d="m2 12 4-4 2 2 2-3 4 5"/>',
+  sheet: '<rect x="2" y="1.5" width="12" height="13" rx="1"/><path d="M2 6h12M2 10h12M6 6v8"/>',
+  document: '<path d="M9 1.5H3v13h10V5.5zm0 0v4h4M5 8h6M5 11h4"/>',
+  file: '<path d="M9 1.5H3v13h10V5.5zm0 0v4h4"/>',
+}
+
 async function appendTreeEntries(container: DocumentFragment | HTMLElement, folder: string, depth: number): Promise<void> {
   const entries = await readDirectory(folder)
+  entries.sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || treeNameCollator.compare(a.name, b.name))
   for (const entry of entries) {
     const row = document.createElement('button')
     row.type = 'button'
     row.className = 'file-tree-row'
     row.style.setProperty('--tree-indent', `${depth * 16}px`)
+    row.setAttribute('aria-label', entry.name)
     row.dataset.path = entry.path
     row.dataset.kind = entry.is_dir ? 'directory' : isImagePath(entry.path) ? 'image' : isMarkdownPath(entry.path) ? 'markdown' : 'file'
-    if (!entry.is_dir && currentFile === entry.path) {
+    if (!entry.is_dir && currentFile && normalizeComparablePath(currentFile) === normalizeComparablePath(entry.path)) {
       row.classList.add('active')
       row.setAttribute('aria-current', 'page')
     }
@@ -2238,19 +2354,38 @@ async function appendTreeEntries(container: DocumentFragment | HTMLElement, fold
 
     const isExpanded = entry.is_dir && expandedTreeDirectories.has(entry.path)
     if (entry.is_dir) row.setAttribute('aria-expanded', String(isExpanded))
+    const chevron = document.createElement('span')
+    chevron.className = 'file-tree-chevron'
+    chevron.setAttribute('aria-hidden', 'true')
+    if (entry.is_dir) {
+      chevron.classList.toggle('expanded', isExpanded)
+      chevron.innerHTML = '<svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></svg>'
+    }
+    const extension = entry.is_dir ? '' : /\.[^.]+$/.exec(entry.name)?.[0] || ''
+    const type = entry.is_dir ? 'folder'
+      : isMarkdownPath(entry.path) ? 'markdown'
+      : isImagePath(entry.path) ? 'image'
+      : /\.(xlsx?|csv|ods)$/i.test(extension) ? 'sheet'
+      : /\.(docx?|pdf|pptx?|rtf|odt)$/i.test(extension) ? 'document' : 'file'
+    row.dataset.fileType = type
     const icon = document.createElement('span')
     icon.className = 'file-tree-icon'
-    if (entry.is_dir) {
-      icon.classList.add('file-tree-chevron')
-      icon.classList.toggle('expanded', isExpanded)
-      icon.setAttribute('aria-hidden', 'true')
-    } else {
-      icon.textContent = isImagePath(entry.path) ? '▧' : '·'
-    }
+    icon.setAttribute('aria-hidden', 'true')
+    icon.innerHTML = `<svg viewBox="0 0 16 16">${TREE_ICONS[type]}</svg>`
     const label = document.createElement('span')
     label.className = 'file-tree-name'
-    label.textContent = entry.name
-    row.append(icon, label)
+    const basename = document.createElement('span')
+    basename.className = 'file-tree-basename'
+    const showExtension = extension.length > 1 && extension.length < 16 && entry.name.length > extension.length
+    basename.textContent = showExtension ? entry.name.slice(0, -extension.length) : entry.name
+    label.append(basename)
+    if (showExtension) {
+      const suffix = document.createElement('span')
+      suffix.className = 'file-tree-extension'
+      suffix.textContent = extension
+      label.append(suffix)
+    }
+    row.append(chevron, icon, label)
     container.append(row)
 
     if (entry.is_dir && expandedTreeDirectories.has(entry.path)) {
@@ -2593,26 +2728,17 @@ async function convertOfficeToMarkdown(kind: ConvertImportKind) {
 }
 
 async function exportHtml() {
-  // 先选要导出的 .md 文件，再选输出位置
-  const picked = await pickOpenFile(
-    [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
-    'text',
-  )
-  if (!picked) return
-  if (!await saveBeforeFileSwitch()) return
-  const target = await pickSavePath(swapExtension(picked.filePath, '.html'), [
+  const snapshot = editor.value
+  const sourcePath = currentFile
+  const target = await pickSavePath(swapExtension(sourcePath || '文档.md', '.html'), [
     { name: 'HTML', extensions: ['html'] },
   ])
   if (!target) return
   setBusy(true, '正在导出 HTML…')
-  log('info', 'export', `开始导出 HTML：${picked.filePath}`)
+  log('info', 'export', `开始导出 HTML：${sourcePath}`)
   try {
-    const html = await buildPortableHtml(picked.text, picked.filePath)
+    const html = await buildPortableHtml(snapshot, sourcePath)
     await writeTextFile(target, html)
-    setMarkdown(picked.text)
-    setCurrentFile(picked.filePath)
-    lastSavedMarkdown = picked.text
-    updateDocumentSaveState()
     setStatus(`已导出 HTML 到 ${target}`)
     showToast('已导出 HTML', 'success')
     log('info', 'export', `已导出 HTML 到 ${target}`)
@@ -2656,7 +2782,6 @@ async function exportPdf() {
   const restorePrintState = () => {
     document.title = previousTitle
     setBusy(false)
-    window.removeEventListener('afterprint', restorePrintState)
   }
 
   try {
@@ -2666,43 +2791,40 @@ async function exportPdf() {
     closeEditorContextMenu()
     closeFileTreeContextMenu()
     if (appearanceDialog.open) appearanceDialog.close()
+    if (largePreviewTimer) clearTimeout(largePreviewTimer)
+    largePreviewTimer = null
+    renderPreview(editor.value)
+    await previewReady
     await waitForPreviewImages()
     document.title = `${printTitle} - MarkFlow`
-    window.addEventListener('afterprint', restorePrintState, { once: true })
     setStatus('已打开系统打印窗口，请选择“另存为 PDF”')
-    requestAnimationFrame(() => window.print())
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    window.print()
   } catch (error) {
     restorePrintState()
     showToast(`导出 PDF 失败：${errMsg(error)}`, 'error')
+  } finally {
+    restorePrintState()
   }
 }
 
 async function exportDocx() {
-  // 先选要导出的 .md 文件，再选输出位置
-  const picked = await pickOpenFile(
-    [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
-    'text',
-  )
-  if (!picked) return
-  if (!await saveBeforeFileSwitch()) return
-  const target = await pickSavePath(swapExtension(picked.filePath, '.docx'), [
+  const snapshot = editor.value
+  const sourcePath = currentFile
+  const target = await pickSavePath(swapExtension(sourcePath || '文档.md', '.docx'), [
     { name: 'Word', extensions: ['docx'] },
   ])
   if (!target) return
   setBusy(true, '正在导出 Word…')
-  if (/!\[[^\]]*\]\(/i.test(picked.text)) {
+  if (/!\[[^\]]*\]\(/i.test(snapshot)) {
     showToast('文档包含图片，导出 Word 将显示占位文本（暂不支持嵌入图片）', 'warning')
   }
-  log('info', 'export', `开始导出 Word：${picked.filePath}`)
+  log('info', 'export', `开始导出 Word：${sourcePath}`)
   try {
     const { markdownToDocxBlob } = await import('./lib/convert')
-    const blob = await markdownToDocxBlob(picked.text)
+    const blob = await markdownToDocxBlob(snapshot)
     const bytes = new Uint8Array(await blob.arrayBuffer())
     await writeBytesFile(target, bytes)
-    setMarkdown(picked.text)
-    setCurrentFile(picked.filePath)
-    lastSavedMarkdown = picked.text
-    updateDocumentSaveState()
     setStatus(`已导出 Word 到 ${target}`)
     showToast('已导出 Word', 'success')
     log('info', 'export', `已导出 Word 到 ${target}`)
@@ -2720,6 +2842,20 @@ function errMsg(err: unknown): string {
 }
 
 // ---------- 绑定事件 ----------
+
+async function enterDesktopNotes() {
+  if (!isTauri()) { showToast('桌面便签模式需要桌面版应用', 'warning'); return }
+  try {
+    await autoSaveCurrentFile('window-blur')
+    persistNow(); await saveWindowBounds(); persistExpandedTreeDirs()
+    await desktopAction('enter')
+  } catch (error) { showToast(`无法打开桌面便签：${errMsg(error)}`, 'error') }
+}
+document.querySelector('#desktop-notes-btn')!.addEventListener('click', () => void enterDesktopNotes())
+document.querySelector('#pet-settings-btn')!.addEventListener('click', () => {
+  if (!isTauri()) { showToast('宠物样式需要桌面版应用', 'warning'); return }
+  void desktopAction('pet-settings').catch(error => showToast(`无法打开宠物设置：${errMsg(error)}`, 'error'))
+})
 
 windowMinimizeBtn.addEventListener('click', () => {
   if (isTauri()) void getCurrentWindow().minimize().catch(() => undefined)
@@ -2811,10 +2947,6 @@ fileTree.addEventListener('click', (event) => {
     void insertImageFromPath(path).catch((error) => showToast(`插入图片失败：${errMsg(error)}`, 'error'))
   }
 })
-
-function normalizeComparablePath(path: string) {
-  return path.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
-}
 
 function pathIsSameOrChild(path: string, parent: string) {
   const value = normalizeComparablePath(path)
@@ -2937,8 +3069,21 @@ editor.addEventListener('paste', (event) => {
   void importClipboardImages(files).catch((error) => showToast(`粘贴图片失败：${errMsg(error)}`, 'error'))
 })
 
+let composingMarkdown = false
+editor.addEventListener('compositionstart', () => {
+  recordUndoState()
+  composingMarkdown = true
+})
+editor.addEventListener('compositionend', () => { composingMarkdown = false })
 editor.addEventListener('beforeinput', (event) => {
-  if (!event.inputType.startsWith('history')) recordUndoState()
+  if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+    // Also handle native macOS Edit menu actions, which arrive without a keydown.
+    if (editor.value.length <= LARGE_DOCUMENT_CHARS) {
+      event.preventDefault()
+      if (event.inputType === 'historyUndo') undoMarkdown()
+      else redoMarkdown()
+    }
+  } else if (!composingMarkdown) recordUndoState()
 })
 editor.addEventListener('input', () => {
   lastNonEmptySelection = null
@@ -2965,6 +3110,47 @@ editor.addEventListener('contextmenu', (event) => {
   openEditorContextMenu(event)
 })
 
+preview.addEventListener('contextmenu', (event) => {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || selection.isCollapsed) return
+  event.preventDefault()
+  try {
+    if (largePreviewTimer) throw new Error('预览正在更新，请稍后重新选择文字')
+    const ranges = previewSelectionRanges(preview, selection.getRangeAt(0), editor.value)
+    if (!ranges.length) return
+    openEditorContextMenu(event)
+    formatRanges = ranges
+    formatSourceSnapshot = editor.value
+    editorContextMenu.dataset.origin = 'preview'
+    editorContextMenu.querySelectorAll<HTMLButtonElement>('[data-text-format]').forEach((button) => { button.disabled = false })
+  } catch (error) { showToast(errMsg(error), 'warning') }
+})
+
+function applyTextFormat(format: TextFormat, value = '') {
+  if (editor.value !== formatSourceSnapshot) throw new Error('文档已变化，请重新选择文字')
+  if (!formatRanges.length) return
+  const next = formatSource(editor.value, formatRanges, format, value)
+  const start = formatRanges[0].start
+  applyEdit(next, start, start)
+  textStyleDialog.close()
+  closeEditorContextMenu()
+}
+
+textStyleDialog.addEventListener('click', (event) => {
+  const format = (event.target as Element).closest<HTMLElement>('[data-apply-style]')?.dataset.applyStyle as TextFormat | undefined
+  if (!format) return
+  const input = document.querySelector<HTMLInputElement | HTMLSelectElement>(`#selection-${format}`)!
+  try { applyTextFormat(format, input.value) } catch (error) { showToast(errMsg(error), 'warning') }
+})
+
+document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-typography]').forEach((input) => {
+  input.addEventListener('change', () => {
+    if (!input.checkValidity() || !input.value) { applyAppearance(appearanceSettings); return }
+    const key = input.dataset.typography as keyof AppearanceSettings
+    updateAppearance({ [key]: input instanceof HTMLInputElement ? Number(input.value) : input.value })
+  })
+})
+
 contextSubmenuTriggers.forEach((trigger) => {
   const wrapper = trigger.parentElement!
   wrapper.addEventListener('pointerenter', () => openContextSubmenu(trigger))
@@ -2985,6 +3171,14 @@ editorContextMenu.addEventListener('click', async (event) => {
   const target = event.target
   if (!(target instanceof Element)) return
   if (target.closest('[data-context-submenu]')) return
+  const format = target.closest<HTMLElement>('[data-text-format]')?.dataset.textFormat
+  if (format) {
+    try {
+      if (format === 'custom') { closeEditorContextMenu(); textStyleDialog.showModal() }
+      else applyTextFormat(format as TextFormat)
+    } catch (error) { showToast(errMsg(error), 'warning') }
+    return
+  }
 
   const language = target.closest<HTMLButtonElement>('[data-context-code]')?.dataset.contextCode
   const diagram = target.closest<HTMLButtonElement>('[data-context-diagram]')?.dataset.contextDiagram
@@ -3050,47 +3244,52 @@ document.addEventListener('auxclick', (e) => {
 }, true)
 
 editor.addEventListener('keydown', (e) => {
+  if (e.isComposing || e.keyCode === 229) return
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && continueMarkdownStructure()) {
     e.preventDefault()
     return
   }
   // Tab 不带 Ctrl/Meta，必须单独、优先处理，否则会被默认行为（跳走焦点）吃掉
-  if (e.key === 'Tab') {
+  if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault()
     if (e.shiftKey) outdentSelection()
     else indentOrInsert()
     return
   }
-  if (!(e.ctrlKey || e.metaKey)) return
+  if (!primaryModifier(e) || e.altKey || e.shiftKey) return
   const key = e.key.toLowerCase()
   if (key === 'i') { e.preventDefault(); wrapSelection('*') }
 })
 
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+  if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || document.querySelector('dialog[open]')) return
+  const target = e.target as HTMLElement
+  const otherInput = target !== editor && Boolean(target.closest('input, textarea, [contenteditable="true"]'))
+  if (otherInput && !preview.contains(target)) return
+  if (primaryModifier(e) && !e.altKey && e.key.toLowerCase() === 's') {
     e.preventDefault()
-    void saveMarkdown().catch((error) => showToast(`保存失败：${errMsg(error)}`, 'error'))
+    void (e.shiftKey ? saveMarkdownAs() : saveMarkdown()).catch((error) => showToast(`保存失败：${errMsg(error)}`, 'error'))
     return
   }
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && undoMarkdown()) {
+  if (primaryModifier(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && undoMarkdown()) {
     e.preventDefault()
     return
   }
   // 重做：Ctrl+Y（Windows/Linux）或 Ctrl/Command + Shift + Z（macOS 习惯）
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'y' && redoMarkdown()) {
+  if (!isMacOS && primaryModifier(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'y' && redoMarkdown()) {
     e.preventDefault()
     return
   }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && redoMarkdown()) {
+  if (primaryModifier(e) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && redoMarkdown()) {
     e.preventDefault()
     return
   }
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+  if (primaryModifier(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
     e.preventDefault()
     toggleFileTree()
     return
   }
-  if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+  if (!primaryModifier(e) || e.altKey) return
   const zoomIn = e.key === '+' || e.key === '=' || e.code === 'NumpadAdd'
   const zoomOut = e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract'
   const zoomReset = e.key === '0' || e.code === 'Numpad0'
@@ -3356,39 +3555,73 @@ previewColorInput.addEventListener('input', () => {
   updateAppearance({ previewColor: previewColorInput.value, previewColorCustom: true })
 })
 
-chooseBackgroundBtn.addEventListener('click', () => backgroundFileInput.click())
+async function applyWallpaper(asset: StoredBackgroundAsset) {
+  await showBackgroundAsset(asset, true)
+  updateAppearance({
+    backgroundOpacity: appearanceSettings.backgroundOpacity || 100,
+    panelOpacity: appearanceSettings.panelOpacity >= DEFAULT_APPEARANCE.panelOpacity ? 80 : appearanceSettings.panelOpacity,
+  })
+}
+
+setupWallpaperLibrary(applyWallpaper, (path, values) => {
+  if (activeWallpaper && (activeWallpaper.projectPath || activeWallpaper.path) === path) wallpaperPlayer?.properties(values)
+}, () => activeWallpaper)
+customBackground.addEventListener('wallpaper-error', (event) => showToast(`壁纸渲染失败：${(event as CustomEvent<string>).detail}`, 'error'))
+
+function syncBackgroundPlayback() {
+  if (!customBackground.classList.contains('has-video') && !wallpaperPlayer) return
+  const paused = wallpaperManuallyPaused || document.hidden || appearanceSettings.backgroundOpacity === 0
+    || (appearanceSettings.wallpaperPauseOnBlur && !document.hasFocus())
+  if (paused) backgroundVideo.pause()
+  else void backgroundVideo.play().catch(() => undefined)
+  wallpaperPlayer?.pause(paused)
+  wallpaperPlayBtn.textContent = wallpaperManuallyPaused ? '播放' : '暂停'
+  wallpaperPlayBtn.setAttribute('aria-pressed', String(wallpaperManuallyPaused))
+}
+
+wallpaperPlayBtn.addEventListener('click', () => { wallpaperManuallyPaused = !wallpaperManuallyPaused; syncBackgroundPlayback() })
+wallpaperPauseOnBlur.addEventListener('change', () => updateAppearance({ wallpaperPauseOnBlur: wallpaperPauseOnBlur.checked }))
+window.addEventListener('focus', syncBackgroundPlayback)
+window.addEventListener('blur', syncBackgroundPlayback)
+backgroundVideo.addEventListener('error', () => {
+  if (backgroundVideo.getAttribute('src')) showToast('视频无法播放：文件可能已移动，或当前系统不支持其编码。请换用 H.264 MP4 / WebM。', 'error')
+})
+backgroundImage.addEventListener('error', () => {
+  if (backgroundImage.getAttribute('src')) showToast('背景图片无法读取，请检查文件后重新选择。', 'error')
+})
+document.querySelectorAll<HTMLButtonElement>('[data-glass-preset]').forEach((button) => button.addEventListener('click', () => {
+  const preset = button.dataset.glassPreset
+  updateAppearance({ panelOpacity: preset === 'clear' ? 94 : preset === 'soft' ? 80 : 64,
+    wallpaperBlur: preset === 'clear' ? 0 : preset === 'soft' ? 12 : 20,
+    wallpaperDim: preset === 'glass' ? 20 : 15,
+    panelBlurEnabled: preset !== 'clear', topbarBlurEnabled: preset !== 'clear', statusbarBlurEnabled: preset !== 'clear' })
+}))
+
+chooseBackgroundBtn.addEventListener('click', async () => {
+  if (!isTauri()) { backgroundFileInput.click(); return }
+  try {
+    const path = await pickFilePath([{ name: '图片与视频', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'mp4', 'webm', 'm4v'] }])
+    if (!path) return
+    await applyWallpaper({ path, name: fileNameFromPath(path), type: /\.(mp4|webm|m4v)$/i.test(path) ? 'video/wallpaper' : 'image/wallpaper' })
+    showToast('背景已应用', 'success')
+  } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) showToast(errMsg(error), 'error') }
+})
 backgroundFileInput.addEventListener('change', async () => {
   const file = backgroundFileInput.files?.[0]
   backgroundFileInput.value = ''
   if (!file) return
-  const kind = backgroundKind(file)
-  if (!kind) {
-    showToast('请选择 PNG、JPG、WebP、GIF、MP4 或 WebM 文件', 'error')
-    return
-  }
-  if (file.size > MAX_BACKGROUND_BYTES) {
-    showToast('背景文件不能超过 100 MB', 'error')
-    return
-  }
-
-  const asset: StoredBackgroundAsset = { blob: file, name: file.name, type: file.type }
-  showBackgroundAsset(asset)
-  if (appearanceSettings.backgroundOpacity === 0) updateAppearance({ backgroundOpacity: 100 })
-  try {
-    await saveBackgroundAsset(asset)
-    showToast(kind === 'video' || /\.gif$/i.test(file.name) ? '动态背景已应用' : '背景已应用', 'success')
-  } catch (err) {
-    showToast(`背景已应用，但保存失败：${errMsg(err)}`, 'error')
-  }
+  if (!backgroundKind(file)) { showToast('请选择图片或视频文件', 'warning'); return }
+  if (file.size > MAX_BACKGROUND_BYTES) { showToast('浏览器背景上传上限为 100 MB；桌面版可直接选择本地视频', 'warning'); return }
+  try { await applyWallpaper({ blob: file, name: file.name, type: file.type }); showToast('背景已应用', 'success') }
+  catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) showToast(errMsg(error), 'error') }
 })
 
 clearBackgroundBtn.addEventListener('click', async () => {
   try {
-    await clearBackgroundAsset()
-    showBackgroundAsset(null)
+    await showBackgroundAsset(null, true)
     showToast('背景素材已清除', 'success')
   } catch (err) {
-    showToast(`清除背景失败：${errMsg(err)}`, 'error')
+    if (!(err instanceof DOMException && err.name === 'AbortError')) showToast(`清除背景失败：${errMsg(err)}`, 'error')
   }
 })
 
@@ -3473,12 +3706,11 @@ clearFileIconBtn.addEventListener('click', async () => {
 })
 
 resetAppearanceBtn.addEventListener('click', async () => {
-  appearanceSettings = { ...DEFAULT_APPEARANCE }
-  applyAppearance(appearanceSettings)
-  try { saveAppearanceSettings(appearanceSettings) } catch { /* 保留当前会话效果 */ }
-  showBackgroundAsset(null)
   try {
-    await clearBackgroundAsset()
+    await showBackgroundAsset(null, true)
+    appearanceSettings = { ...DEFAULT_APPEARANCE }
+    applyAppearance(appearanceSettings)
+    try { saveAppearanceSettings(appearanceSettings) } catch { /* 保留当前会话效果 */ }
     if (isTauri()) {
       await clearCustomIcon('app')
       await clearCustomIcon('file')
@@ -3489,7 +3721,7 @@ resetAppearanceBtn.addEventListener('click', async () => {
     updateIconLabels()
     showToast('外观已恢复默认', 'success')
   } catch (err) {
-    showToast(`外观已恢复，背景存储清理失败：${errMsg(err)}`, 'error')
+    if (!(err instanceof DOMException && err.name === 'AbortError')) showToast(`恢复外观时出错：${errMsg(err)}`, 'error')
   }
 })
 
@@ -3499,9 +3731,7 @@ window.addEventListener('blur', () => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && appearanceSettings.autoSaveOnWindowBlur) void autoSaveCurrentFile('window-blur')
-  if (!customBackground.classList.contains('has-video')) return
-  if (document.hidden || appearanceSettings.backgroundOpacity === 0) backgroundVideo.pause()
-  else void backgroundVideo.play().catch(() => undefined)
+  syncBackgroundPlayback()
 })
 
 // 点击菜单外部收起
@@ -3864,7 +4094,7 @@ function persistLayout(key: string, value: string) {
 function setFileTreeVisible(visible: boolean) {
   workspace.classList.toggle('file-tree-hidden', !visible)
   fileTreeToggleBtn.setAttribute('aria-expanded', String(visible))
-  fileTreeToggleBtn.title = visible ? '收起文件树' : '展开文件树'
+  fileTreeToggleBtn.title = `${visible ? '收起资源管理器' : '展开资源管理器'} (${shortcutLabel('B')})`
 }
 
 setFileTreeVisible(localStorage.getItem(FILE_TREE_HIDDEN_KEY) !== 'true')
@@ -4063,11 +4293,6 @@ async function setupImageDrop() {
 async function init() {
   attachLogErrorHandlers()
   log('info', 'app', isTauri() ? 'MarkFlow 桌面端启动' : 'MarkFlow 浏览器预览环境')
-  if (!isMainWindow) {
-    // 新建的独立窗口：空白启动，不复制主窗口的文件树/工作区/上次会话
-    await blankSessionStart()
-    return
-  }
   try {
     const launchFile = await getLaunchFile()
     if (launchFile) {
@@ -4078,7 +4303,7 @@ async function init() {
       setMarkdown(prepared.markdown)
       lastSavedMarkdown = prepared.externalized ? null : prepared.markdown
       updateDocumentSaveState()
-      await restoreWorkspaceFolder()
+      if (isMainWindow) await restoreWorkspaceFolder()
       await renderWorkspaceTree()
       if (prepared.externalized) {
         setStatus(`已提取 ${prepared.imageCount} 张内嵌图片；按 ${shortcutLabel('S')} 保存轻量 Markdown`)
@@ -4094,6 +4319,10 @@ async function init() {
   } catch (err) {
     setStatus(`打开传入文件失败：${errMsg(err)}`)
     log('error', 'open', `打开启动文件失败：${errMsg(err)}`)
+  }
+  if (!isMainWindow) {
+    await blankSessionStart()
+    return
   }
   await restoreSession()
   await restoreWorkspaceFolder()
@@ -4124,5 +4353,55 @@ void restoreBackground()
 void setupImageDrop().catch((error) => console.warn('初始化图片拖拽失败', error))
 // 恢复上次关闭时的窗口位置与尺寸（仅主窗口）
 void restoreWindowBounds()
-void init()
+const runWorkbenchAction = (action: () => Promise<unknown>) => () => {
+  void action().catch((error) => showToast(`操作失败：${errMsg(error)}`, 'error'))
+}
+const fileCommands = [
+  { action: 'new-file', label: '文件：新建文件', key: 'N' },
+  { action: 'new-window', label: '文件：新建窗口', key: 'Shift+N' },
+  { action: 'open-md', label: '文件：打开文件', key: 'O' },
+  { action: 'open-folder', label: '文件：打开文件夹', key: '' },
+  { action: 'save-md', label: '文件：保存', key: 'S' },
+  { action: 'save-as', label: '文件：另存为', key: 'Shift+S' },
+]
+for (const command of fileCommands) {
+  if (!command.key) continue
+  const button = fileMenu.querySelector<HTMLButtonElement>(`[data-file="${command.action}"]`)!
+  const hint = document.createElement('kbd')
+  hint.textContent = shortcutLabel(command.key)
+  button.append(hint)
+}
+document.querySelector('#command-shortcut')!.textContent = shortcutLabel('Shift+P')
+document.querySelector('#find-btn')!.setAttribute('title', `查找 (${shortcutLabel('F')})`)
+setupWorkbench(editor, {
+  beforeEdit: recordUndoState,
+  changed: () => { renderOnly(); editor.dispatchEvent(new Event('select')) },
+  revealEditor: () => setEditorVisible(true),
+  revealLine: (line) => { editor.scrollTop = Math.max(0, editorOffsetForSourceLine(line) - editor.clientHeight / 3) },
+  commands: [
+    ...fileCommands.map((command) => ({
+      label: command.label,
+      shortcut: command.key ? shortcutLabel(command.key) : undefined,
+      run: () => fileMenu.querySelector<HTMLButtonElement>(`[data-file="${command.action}"]`)!.click(),
+    })),
+    ...Array.from(document.querySelectorAll<HTMLButtonElement>('[data-convert]')).map((button) => ({
+      label: `转换：${button.textContent!.trim()}`, run: () => button.click(),
+    })),
+    { label: '视图：切换资源管理器', shortcut: shortcutLabel('B'), run: toggleFileTree },
+    { label: '视图：切换编辑区', run: () => editorToggleBtn.click() },
+    { label: '视图：进入桌面便签模式', run: () => void enterDesktopNotes() },
+    { label: '首选项：打开设置', shortcut: shortcutLabel(','), run: () => openSettings() },
+  ],
+})
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || !primaryModifier(event) || event.altKey || document.querySelector('dialog[open]')) return
+  const target = event.target as HTMLElement
+  if (target !== editor && target.closest('input, textarea, [contenteditable="true"]')) return
+  const key = event.key.toLowerCase()
+  const action = key === 'o' && !event.shiftKey ? openMarkdown
+    : key === 'n' ? (event.shiftKey ? newWindow : newWorkspaceFile)
+    : key === ',' && !event.shiftKey ? () => Promise.resolve(openSettings()) : null
+  if (action) { event.preventDefault(); runWorkbenchAction(action)() }
+})
+void init().then(() => editor.dispatchEvent(new Event('select')))
 setTimeout(() => void checkForUpdate(), 1200)

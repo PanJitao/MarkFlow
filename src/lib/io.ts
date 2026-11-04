@@ -1,5 +1,5 @@
 // 文件读写：用 Tauri 的对话框选文件，再调用 Rust 命令读写
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 
 export type FileFilter = { name: string; extensions: string[] }
@@ -219,3 +219,21 @@ export function resolveRelativePath(fromFile: string, relative: string): Promise
 export function newWindow(): Promise<void> {
   return invoke<void>('new_window')
 }
+
+export interface WallpaperEntry { name: string; path: string; kind: string; preview: string | null; projectPath?: string | null; available?: boolean; reason?: string | null }
+export interface WallpaperLibrary { items: WallpaperEntry[]; roots: string[]; unsupported: number; invalid: number; truncated: boolean }
+export function scanWallpapers(root: string | null): Promise<WallpaperLibrary> {
+  return invoke('scan_wallpapers', { root })
+}
+export async function wallpaperMediaUrl(path: string): Promise<string> {
+  return convertFileSrc(await invoke<string>('authorize_wallpaper_media', { path }))
+}
+export function wallpaperPreviewUrl(path: string): string { return convertFileSrc(path) }
+export function getWallpaperProject(path: string): Promise<{ general?: { properties?: Record<string, unknown> }; [key: string]: unknown }> {
+  return invoke('get_wallpaper_project', { path })
+}
+export async function openWallpaperPlayer(path: string): Promise<{ token: string; url: string }> {
+  const token = await invoke<string>('open_wallpaper_player', { path })
+  return { token, url: `${convertFileSrc(token, 'wallpaper')}/player.html` }
+}
+export function closeWallpaperPlayer(token: string): Promise<void> { return invoke('close_wallpaper_player', { token }) }

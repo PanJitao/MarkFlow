@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "id": "dsh-blue",
+  "name": "蓝发小伙伴",
+  "description": "dsh-pet 原版透明角色与日常动作",
+  "author": "PC2005-cloud",
+  "license": "MIT",
+  "canvas": {
+    "width": 640,
+    "height": 360
+  },
+  "hitBox": {
+    "x": 0.3125,
+    "y": 0.139,
+    "width": 0.375,
+    "height": 0.792
+  },
+  "poster": "poster.png",
+  "clips": {
+    "idle": {
+      "file": "idle.webm",
+      "fallback": "idle.webp",
+      "durationMs": 10042
+    },
+    "look": {
+      "file": "look.webm",
+      "fallback": "look.webp",
+      "durationMs": 10042
+    },
+    "wave": {
+      "file": "wave.webm",
+      "fallback": "wave.webp",
+      "durationMs": 10042
+    },
+    "happy": {
+      "file": "happy.webm",
+      "fallback": "happy.webp",
+      "durationMs": 10042
+    },
+    "shy": {
+      "file": "shy.webm",
+      "fallback": "shy.webp",
+      "durationMs": 10042
+    },
+    "tickle": {
+      "file": "tickle.webm",
+      "fallback": "tickle.webp",
+      "durationMs": 10042
+    },
+    "drag": {
+      "file": "drag.webm",
+      "fallback": "drag.webp",
+      "durationMs": 10042
+    },
+    "stretch": {
+      "file": "stretch.webm",
+      "fallback": "stretch.webp",
+      "durationMs": 10042
+    },
+    "cube": {
+      "file": "cube.webm",
+      "fallback": "cube.webp",
+      "durationMs": 10042
+    },
+    "hum": {
+      "file": "hum.webm",
+      "fallback": "hum.webp",
+      "durationMs": 10042
+    },
+    "remind": {
+      "file": "remind.webm",
+      "fallback": "remind.webp",
+      "durationMs": 10042
+    },
+    "celebrate": {
+      "file": "celebrate.webm",
+      "fallback": "celebrate.webp",
+      "durationMs": 10042
+    },
+    "sleepStart": {
+      "file": "sleepStart.webm",
+      "fallback": "sleepStart.webp",
+      "durationMs": 10042
+    },
+    "sleep": {
+      "file": "sleep.webm",
+      "fallback": "sleep.webp",
+      "durationMs": 10042
+    },
+    "wake": {
+      "file": "wake.webm",
+      "fallback": "wake.webp",
+      "durationMs": 10042
+    }
+  },
+  "actions": {
+    "idle": [
+      "idle",
+      "idle",
+      "idle",
+      "look",
+      "stretch",
+      "cube",
+      "hum"
+    ],
+    "react": [
+      "happy",
+      "shy",
+      "tickle",
+      "wave"
+    ],
+    "wave": [
+      "wave"
+    ],
+    "drag": [
+      "drag"
+    ],
+    "remind": [
+      "remind"
+    ],
+    "celebrate": [
+      "celebrate"
+    ],
+    "stretch": [
+      "stretch"
+    ],
+    "play": [
+      "cube"
+    ],
+    "sleepStart": [
+      "sleepStart"
+    ],
+    "sleep": [
+      "sleep"
+    ],
+    "wake": [
+      "wake"
+    ]
+  },
+  "phrases": {
+    "greeting": "我来啦。点我互动，双击或点下方便签记事。",
+    "tap": [
+      "我在呢。今天想先做哪件事？",
+      "点下面的便签，就能把事情记下来。",
+      "一件一件来，我陪着你。"
+    ]
+  }
+}

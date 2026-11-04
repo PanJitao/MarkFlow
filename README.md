@@ -29,15 +29,15 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 
 ### 文件夹工作区与实时预览
 
-![MarkFlow 0.4.5 工作台](web/assets/img/current-editor-hd.png)
+![MarkFlow 0.4.5 工作台](web/assets/img/current-editor-hd.png?v=20261104-clean)
 
 ### 设置概览
 
-![MarkFlow 0.4.5 主题与外观](web/assets/img/current-appearance-hd.png)
+![MarkFlow 0.4.5 主题与外观](web/assets/img/current-appearance-hd.png?v=20261104-clean)
 
 ### 转换菜单
 
-![MarkFlow 0.4.5 转换菜单](web/assets/img/current-convert-hd.png)
+![MarkFlow 0.4.5 转换菜单](web/assets/img/current-convert-hd.png?v=20261104-clean)
 
 ## 核心功能
 

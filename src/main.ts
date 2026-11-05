@@ -5,7 +5,9 @@ import { formatSource, previewSelectionRanges, type SourceRange, type TextFormat
 import { setupWallpaperLibrary } from './lib/wallpaper'
 import { mountWallpaperPlayer, type WallpaperPlayer } from './lib/wallpaper-runtime'
 import { savedWallpaperValues } from './lib/wallpaper-properties'
-import { desktopAction } from './lib/desktop-notes'
+import { desktopAction, getDesktopData, emptyDesktopData, type DesktopData } from './lib/desktop-notes'
+import { getVersion } from '@tauri-apps/api/app'
+import { listen } from '@tauri-apps/api/event'
 import { setupWorkbench } from './lib/workbench'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
@@ -224,7 +226,8 @@ let wallpaperManuallyPaused = false
 let wallpaperPlayer: WallpaperPlayer | null = null
 let activeWallpaper: StoredBackgroundAsset | null = null
 const wallpaperPlayBtn = document.querySelector<HTMLButtonElement>('#wallpaper-play-btn')!
-const wallpaperPauseOnBlur = document.querySelector<HTMLInputElement>('#wallpaper-pause-on-blur')!
+const wallpaperPauseOnBlur = document.querySelector<HTMLSelectElement>('#wallpaper-pause-on-blur')!
+const wallpaperPauseWhenHidden = document.querySelector<HTMLSelectElement>('#wallpaper-pause-when-hidden')!
 let faviconObjectUrl: string | null = null
 let formatRanges: SourceRange[] = []
 let formatSourceSnapshot = ''
@@ -235,6 +238,8 @@ let pendingContextSelection: { start: number; end: number } | null = null
 let lastNonEmptySelection: { start: number; end: number } | null = null
 let availableUpdate: Update | null = null
 let updateInstalling = false
+let updateChecking = false
+let currentAppVersion = ''
 let zoomToast: HTMLElement | null = null
 let zoomToastTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -656,17 +661,25 @@ async function checkForUpdate(manual = false): Promise<boolean> {
     }
     return false
   }
+  if (updateChecking || updateInstalling) return false
+  updateChecking = true
+  if (checkUpdatesBtn) checkUpdatesBtn.disabled = true
+  if (updateCheckStatusEl) updateCheckStatusEl.textContent = '正在检查更新…'
   try {
+    currentAppVersion ||= await getVersion()
+    document.querySelector('#current-app-version')!.textContent = currentAppVersion
     const update = await check({ timeout: 12_000 })
-    if (updateCheckStatusEl) updateCheckStatusEl.textContent = update ? '发现新版本 ' + update.version : '当前已是最新版本'
+    const latestMessage = currentAppVersion.includes('-') ? '当前为测试版，暂无可用的正式版更新' : '当前已是最新版本'
+    if (updateCheckStatusEl) updateCheckStatusEl.textContent = update ? '发现新版本 ' + update.version : latestMessage
     log('info', 'update', update ? `发现新版本 ${update.version}，当前版本 ${update.currentVersion}` : '当前已是最新版本')
     if (!update) {
       if (manual) {
-        setStatus('当前已是最新版本')
-        showToast('当前已是最新版本', 'success')
+        setStatus(latestMessage)
+        showToast(latestMessage, 'success')
       }
       return false
     }
+    if (availableUpdate) await availableUpdate.close()
     availableUpdate = update
     updateInstalling = false
     updateVersionEl.textContent = `发现新版本 ${update.version}，当前版本 ${update.currentVersion}`
@@ -683,12 +696,15 @@ async function checkForUpdate(manual = false): Promise<boolean> {
   } catch (err) {
     console.warn('检查更新失败', err)
     log('error', 'update', `检查更新失败：${errMsg(err)}`)
-    if (updateCheckStatusEl) updateCheckStatusEl.textContent = '检查更新失败'
+    if (updateCheckStatusEl) updateCheckStatusEl.textContent = `检查失败，可点击重试：${errMsg(err)}`
     if (manual) {
       setStatus(`检查更新失败：${errMsg(err)}`)
       showToast(`检查更新失败：${errMsg(err)}`, 'error')
     }
     return false
+  } finally {
+    updateChecking = false
+    if (checkUpdatesBtn) checkUpdatesBtn.disabled = false
   }
 }
 
@@ -736,7 +752,8 @@ function applyAppearance(settings: AppearanceSettings) {
   root.dataset.theme = darkTheme ? 'dark' : 'light'
   root.style.setProperty('--wallpaper-blur', `${settings.panelBlurEnabled ? settings.wallpaperBlur : 0}px`)
   root.style.setProperty('--wallpaper-dim', String(settings.wallpaperDim / 100))
-  wallpaperPauseOnBlur.checked = settings.wallpaperPauseOnBlur
+  wallpaperPauseOnBlur.value = settings.wallpaperPauseOnBlur ? 'pause' : 'continue'
+  wallpaperPauseWhenHidden.value = settings.wallpaperPauseWhenHidden ? 'pause' : 'continue'
   root.style.setProperty('--tree-font', FONT_FAMILIES[settings.treeFont])
   root.style.setProperty('--editor-font', FONT_FAMILIES[settings.editorFont])
   root.style.setProperty('--preview-font', FONT_FAMILIES[settings.previewFont])
@@ -2843,15 +2860,52 @@ function errMsg(err: unknown): string {
 
 // ---------- 绑定事件 ----------
 
-async function enterDesktopNotes() {
+async function openDesktopNotes(action: 'notes' | 'enter' = 'notes') {
   if (!isTauri()) { showToast('桌面便签模式需要桌面版应用', 'warning'); return }
   try {
-    await autoSaveCurrentFile('window-blur')
-    persistNow(); await saveWindowBounds(); persistExpandedTreeDirs()
-    await desktopAction('enter')
+    if (action === 'enter') {
+      await autoSaveCurrentFile('window-blur')
+      persistNow(); await saveWindowBounds(); persistExpandedTreeDirs()
+    }
+    await desktopAction(action)
   } catch (error) { showToast(`无法打开桌面便签：${errMsg(error)}`, 'error') }
 }
-document.querySelector('#desktop-notes-btn')!.addEventListener('click', () => void enterDesktopNotes())
+document.querySelector('#desktop-notes-btn')!.addEventListener('click', () => void openDesktopNotes())
+document.querySelectorAll<HTMLButtonElement>('[data-desktop-action]').forEach(button => {
+  button.addEventListener('click', () => void openDesktopNotes(button.dataset.desktopAction as 'notes' | 'enter'))
+})
+let desktopState = emptyDesktopData()
+function updateDesktopControls(data: DesktopData) {
+  if (data.revision < desktopState.revision) return
+  desktopState = data
+  const visible = data.enabled && !data.petHidden
+  document.querySelectorAll<HTMLButtonElement>('[data-desktop-pet-toggle]').forEach(button => {
+    button.disabled = false
+    button.textContent = visible ? '关闭宠物' : '显示宠物'
+    button.setAttribute('aria-pressed', String(visible))
+  })
+}
+async function toggleDesktopPet() {
+  if (!isTauri()) { showToast('桌面宠物需要桌面版应用', 'warning'); return }
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-desktop-pet-toggle]')
+  buttons.forEach(button => button.disabled = true)
+  try {
+    await desktopAction(desktopState.enabled && !desktopState.petHidden ? 'hide-pet' : 'pet')
+    updateDesktopControls(await getDesktopData())
+  } catch (error) { showToast(`无法切换宠物：${errMsg(error)}`, 'error') }
+  finally { buttons.forEach(button => button.disabled = false) }
+}
+document.querySelectorAll('[data-desktop-pet-toggle]').forEach(button => button.addEventListener('click', () => void toggleDesktopPet()))
+if (isTauri()) {
+  void (async () => {
+    await listen<DesktopData>('desktop-data', event => updateDesktopControls(event.payload))
+    updateDesktopControls(await getDesktopData())
+  })().catch(error => showToast(`桌面便签状态读取失败：${errMsg(error)}`, 'error'))
+  void getVersion().then(version => {
+    currentAppVersion = version
+    document.querySelector('#current-app-version')!.textContent = version
+  }).catch(() => undefined)
+}
 document.querySelector('#pet-settings-btn')!.addEventListener('click', () => {
   if (!isTauri()) { showToast('宠物样式需要桌面版应用', 'warning'); return }
   void desktopAction('pet-settings').catch(error => showToast(`无法打开宠物设置：${errMsg(error)}`, 'error'))
@@ -3570,8 +3624,8 @@ customBackground.addEventListener('wallpaper-error', (event) => showToast(`壁�
 
 function syncBackgroundPlayback() {
   if (!customBackground.classList.contains('has-video') && !wallpaperPlayer) return
-  const paused = wallpaperManuallyPaused || document.hidden || appearanceSettings.backgroundOpacity === 0
-    || (appearanceSettings.wallpaperPauseOnBlur && !document.hasFocus())
+  const paused = wallpaperManuallyPaused || appearanceSettings.backgroundOpacity === 0
+    || (document.hidden ? appearanceSettings.wallpaperPauseWhenHidden : appearanceSettings.wallpaperPauseOnBlur && !document.hasFocus())
   if (paused) backgroundVideo.pause()
   else void backgroundVideo.play().catch(() => undefined)
   wallpaperPlayer?.pause(paused)
@@ -3580,7 +3634,8 @@ function syncBackgroundPlayback() {
 }
 
 wallpaperPlayBtn.addEventListener('click', () => { wallpaperManuallyPaused = !wallpaperManuallyPaused; syncBackgroundPlayback() })
-wallpaperPauseOnBlur.addEventListener('change', () => updateAppearance({ wallpaperPauseOnBlur: wallpaperPauseOnBlur.checked }))
+wallpaperPauseOnBlur.addEventListener('change', () => updateAppearance({ wallpaperPauseOnBlur: wallpaperPauseOnBlur.value === 'pause' }))
+wallpaperPauseWhenHidden.addEventListener('change', () => updateAppearance({ wallpaperPauseWhenHidden: wallpaperPauseWhenHidden.value === 'pause' }))
 window.addEventListener('focus', syncBackgroundPlayback)
 window.addEventListener('blur', syncBackgroundPlayback)
 backgroundVideo.addEventListener('error', () => {
@@ -4141,8 +4196,16 @@ if (!isNaN(savedFileTreeWidth)) applyFileTreeWidth(savedFileTreeWidth)
 function startDrag(clientX: number) {
   splitter.classList.add('dragging')
   document.body.style.cursor = 'col-resize'
-  const rect = workspace.getBoundingClientRect()
-  const onMove = (ev: MouseEvent) => applySplit(((ev.clientX - rect.left) / rect.width) * 100)
+  const workspaceWidth = workspace.getBoundingClientRect().width
+  const style = getComputedStyle(workspace)
+  const initialSplit = parseFloat(style.getPropertyValue('--split'))
+  // 文件树展开时，CSS 从分栏基准宽度中减去了 tree-editor-offset。
+  const treeOffset = workspace.classList.contains('file-tree-hidden') ? 0 : parseFloat(style.getPropertyValue('--tree-editor-offset'))
+  const initialBasis = editorPanel.getBoundingClientRect().width + treeOffset
+  const onMove = (ev: MouseEvent) => {
+    const deltaX = ev.clientX - clientX
+    applySplit(deltaX === 0 ? initialSplit : ((initialBasis + deltaX) / workspaceWidth) * 100)
+  }
   const onUp = () => {
     splitter.classList.remove('dragging')
     document.body.style.cursor = ''
@@ -4389,7 +4452,10 @@ setupWorkbench(editor, {
     })),
     { label: '视图：切换资源管理器', shortcut: shortcutLabel('B'), run: toggleFileTree },
     { label: '视图：切换编辑区', run: () => editorToggleBtn.click() },
-    { label: '视图：进入桌面便签模式', run: () => void enterDesktopNotes() },
+    { label: '视图：在新窗口打开便签与待办', run: () => void openDesktopNotes() },
+    { label: '视图：切换到便签模式', run: () => void openDesktopNotes('enter') },
+    { label: '视图：显示或关闭桌面宠物', run: () => void toggleDesktopPet() },
+    { label: '帮助：检查更新', run: () => { openSettings('updates'); void checkForUpdate(true) } },
     { label: '首选项：打开设置', shortcut: shortcutLabel(','), run: () => openSettings() },
   ],
 })

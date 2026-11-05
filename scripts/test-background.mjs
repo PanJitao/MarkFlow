@@ -27,10 +27,11 @@ const image = name => ({ blob: new Blob(['image'], { type: 'image/png' }), name,
 const video = { path: '/library/video.mp4', projectPath: '/library/project.json', name: '视频壁纸', type: 'video/wallpaper' }
 const scene = { path: '/scene/project.json', projectPath: '/scene/project.json', name: '场景壁纸', type: 'scene/wallpaper' }
 
-async function start() {
+async function start(savedAppearance) {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() })
   doms.push(dom)
   const w = dom.window
+  if (savedAppearance) w.localStorage.setItem('exchangemd:appearance', savedAppearance)
   w.indexedDB = database; w.Blob = Blob; w.structuredClone = structuredClone
   w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder
   w.matchMedia = () => ({ matches: false, addEventListener() {} })
@@ -39,8 +40,8 @@ async function start() {
   w.HTMLElement.prototype.scrollIntoView = function () {}
   w.HTMLDialogElement.prototype.showModal = function () { this.open = true }
   w.HTMLDialogElement.prototype.close = function () { this.open = false }
-  w.HTMLMediaElement.prototype.play = async function () {}
-  w.HTMLMediaElement.prototype.pause = function () {}
+  w.HTMLMediaElement.prototype.play = async function () { this.dataset.playback = 'playing' }
+  w.HTMLMediaElement.prototype.pause = function () { this.dataset.playback = 'paused' }
   w.HTMLMediaElement.prototype.load = function () {}
   const revoked = []; let serial = 0
   w.URL.createObjectURL = () => `blob:upload-${++serial}`
@@ -85,6 +86,29 @@ try {
   assert.ok((await store.loadBackgroundAsset()).blob instanceof Blob)
   await api.applyWallpaper(video)
   assert.equal((await store.loadBackgroundAsset()).path, video.path)
+  let focused = true, hidden = false
+  w.document.hasFocus = () => focused
+  Object.defineProperty(w.document, 'hidden', { get: () => hidden })
+  const selectPolicy = (id, value) => { $(id).value = value; $(id).dispatchEvent(new w.Event('change')) }
+  focused = false; w.dispatchEvent(new w.Event('blur'))
+  assert.equal($('#background-video').dataset.playback, 'paused', 'legacy setting pauses on blur')
+  selectPolicy('#wallpaper-pause-on-blur', 'continue')
+  assert.equal($('#background-video').dataset.playback, 'playing', 'continue-on-blur applies immediately')
+  hidden = true; w.document.dispatchEvent(new w.Event('visibilitychange'))
+  assert.equal($('#background-video').dataset.playback, 'paused', 'minimized windows pause by default')
+  selectPolicy('#wallpaper-pause-when-hidden', 'continue')
+  selectPolicy('#wallpaper-pause-on-blur', 'pause')
+  assert.equal($('#background-video').dataset.playback, 'playing', 'hidden playback uses its own policy')
+  $('#wallpaper-play-btn').click()
+  assert.equal($('#background-video').dataset.playback, 'paused', 'manual pause overrides all automatic policies')
+  $('#wallpaper-play-btn').click()
+  assert.equal($('#background-video').dataset.playback, 'playing')
+  const settings = w.localStorage.getItem('exchangemd:appearance')
+  const restoredPolicy = await start(settings)
+  assert.equal(restoredPolicy.$('#wallpaper-pause-on-blur').value, 'pause')
+  assert.equal(restoredPolicy.$('#wallpaper-pause-when-hidden').value, 'continue', 'playback preferences survive reopening')
+  restoredPolicy.w.close()
+  hidden = false; focused = true; w.dispatchEvent(new w.Event('focus'))
   assert.equal((await store.loadBackgroundAsset()).blob, undefined, 'WE selection removes the uploaded Blob from storage')
   assert.ok(revoked.includes(uploadedUrl), `old upload object URL is released: ${uploadedUrl} / ${revoked.join(', ')}`)
   assert.equal($('#background-image').getAttribute('src'), null)
@@ -92,6 +116,15 @@ try {
   await api.applyWallpaper(scene)
   assert.equal($('#background-video').getAttribute('src'), null)
   assert.equal(w.document.querySelectorAll('.wallpaper-live-frame').length, 1)
+  const playerMessages = []
+  $('.wallpaper-live-frame').contentWindow.postMessage = data => playerMessages.push(data)
+  focused = false; w.dispatchEvent(new w.Event('blur'))
+  assert.equal(playerMessages.at(-1).value, true, 'scene renderer receives blur pause')
+  selectPolicy('#wallpaper-pause-on-blur', 'continue')
+  assert.equal(playerMessages.at(-1).value, false, 'scene renderer receives background playback')
+  hidden = true; w.document.dispatchEvent(new w.Event('visibilitychange'))
+  assert.equal(playerMessages.at(-1).value, false, 'scene and video share the same hidden policy')
+  hidden = false; focused = true; w.dispatchEvent(new w.Event('focus'))
   await api.applyWallpaper(image('新的上传.png'))
   assert.equal(w.document.querySelectorAll('.wallpaper-live-frame').length, 0)
   assert.equal(closed.length, 1, 'local upload destroys the old scene player')

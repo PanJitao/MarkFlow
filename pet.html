@@ -13,13 +13,13 @@
     <div id="pet-extra-controls" hidden><select id="pet-extra-action" aria-label="自定义动作"></select><button id="pet-extra-play">播放动作</button></div>
     <div class="menu-line"></div>
     <button role="menuitem" data-pet-action="demo">预览提醒气泡</button><button role="menuitem" data-pet-action="pet-settings">宠物样式与 AI 接入</button><button role="menuitem" data-pet-action="editor">返回编辑器</button>
-    <div class="menu-line"></div><button role="menuitem" data-pet-action="disable">关闭便签模式</button><button role="menuitem" data-pet-action="quit">退出软件</button>
-    <small id="pet-credit" class="pet-credit">动画素材：dsh-pet · MIT</small>
+    <div class="menu-line"></div><button role="menuitem" data-pet-action="hide-pet">关闭宠物</button><button role="menuitem" data-pet-action="quit">退出软件</button>
+    <small id="pet-credit" class="pet-credit">动画素材：dsh-pet · PC2005-cloud</small>
   </div>
   <div id="pet" class="pet" data-action="idle">
-    <div id="pet-stage" class="pet-stage"><img id="pet-poster" src="./pets/dsh-blue/poster.png" alt="蓝发桌面小伙伴" draggable="false"></div>
+    <div id="pet-stage" class="pet-stage"><img id="pet-poster" src="./pets/dsh-blue/poster.png" alt="蓝色大肥鱼" draggable="false"></div>
     <button id="pet-open" class="pet-hit-area" data-interactive aria-label="与宠物互动，双击打开便签，拖动可移动" title="点击互动 · 双击打开便签 · 拖动移动 · 右键菜单"></button>
-    <div class="pet-controls" data-interactive><button id="pet-count" aria-label="打开便签与待办">便签 · 0 待办</button><button id="pet-menu-toggle" aria-label="宠物菜单" aria-expanded="false">···</button></div>
+    <div class="pet-controls" data-interactive><button id="pet-count" aria-label="打开便签与待办">便签 · 0 待办</button><button id="pet-menu-toggle" aria-label="宠物菜单" aria-expanded="false">···</button><button id="pet-close" aria-label="关闭宠物" title="关闭宠物，便签仍可在编辑器或托盘打开">×</button></div>
   </div>
   <script type="module" src="/src/pet.ts"></script>
 </body></html>

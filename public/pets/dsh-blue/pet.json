@@ -1,10 +1,10 @@
 {
   "version": 1,
   "id": "dsh-blue",
-  "name": "蓝发小伙伴",
+  "name": "蓝色大肥鱼",
   "description": "dsh-pet 原版透明角色与日常动作",
   "author": "PC2005-cloud",
-  "license": "MIT",
+  "license": "形象 CC BY-NC-SA 4.0；动画素材仅非商业使用",
   "canvas": {
     "width": 640,
     "height": 360

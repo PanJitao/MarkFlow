@@ -28,6 +28,7 @@ pub struct Alert { pub id: String, pub todo_id: String, pub title: String, pub d
 pub struct DesktopData {
     pub revision: u64,
     pub enabled: bool, pub notes: Vec<Note>, pub todos: Vec<Todo>, pub alerts: Vec<Alert>,
+    pub pet_hidden: bool,
     pub pet_position: Option<(i32, i32)>,
 }
 
@@ -73,8 +74,7 @@ impl DesktopStore {
 }
 
 fn publish(app: &tauri::AppHandle, data: &DesktopData) {
-    let _ = app.emit_to("desktop-pet", "desktop-data", data);
-    let _ = app.emit_to("desktop-notes", "desktop-data", data);
+    let _ = app.emit("desktop-data", data);
 }
 
 #[tauri::command]
@@ -214,6 +214,7 @@ pub fn show_editor(app: &tauri::AppHandle) -> Result<(), String> {
 fn quit(app: &tauri::AppHandle) {
     QUITTING.store(true, Ordering::Relaxed);
     app.remove_tray_by_id("desktop-notes-tray");
+    if app.webview_windows().is_empty() { app.exit(0); return; }
     // Editors and notes receive CloseRequested and finish their saves first.
     for (label, window) in app.webview_windows() {
         if label == "desktop-pet" { let _ = window.destroy(); } else { let _ = window.close(); }
@@ -224,15 +225,16 @@ fn ensure_tray(app: &tauri::AppHandle) -> Result<(), String> {
     if app.tray_by_id("desktop-notes-tray").is_some() { return Ok(()); }
     use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder};
     let pet = MenuItem::with_id(app, "pet", "显示宠物", true, None::<&str>).map_err(|e| e.to_string())?;
+    let hide = MenuItem::with_id(app, "hide-pet", "关闭宠物", true, None::<&str>).map_err(|e| e.to_string())?;
     let notes = MenuItem::with_id(app, "notes", "便签与待办", true, None::<&str>).map_err(|e| e.to_string())?;
     let editor = MenuItem::with_id(app, "editor", "返回编辑器", true, None::<&str>).map_err(|e| e.to_string())?;
     let exit = MenuItem::with_id(app, "exit", "退出软件", true, None::<&str>).map_err(|e| e.to_string())?;
-    let menu = Menu::with_items(app, &[&pet, &notes, &editor, &exit]).map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(app, &[&pet, &hide, &notes, &editor, &exit]).map_err(|e| e.to_string())?;
     let mut builder = TrayIconBuilder::with_id("desktop-notes-tray").tooltip("MarkFlow 桌面便签").menu(&menu).on_menu_event(|app, event| {
         let app = app.clone();
         // WebView2 window creation must run outside the synchronous UI event handler.
         std::thread::spawn(move || {
-            let result = match event.id.as_ref() { "pet" => show_pet(&app), "notes" => show_notes(&app), "editor" => show_editor(&app), "exit" => { quit(&app); Ok(()) }, _ => Ok(()) };
+            let result = match event.id.as_ref() { "pet" => enable_pet(&app), "hide-pet" => hide_pet(&app), "notes" => show_notes(&app), "editor" => show_editor(&app), "exit" => { quit(&app); Ok(()) }, _ => Ok(()) };
             if let Err(error) = result { eprintln!("{error}"); }
         });
     });
@@ -241,6 +243,7 @@ fn ensure_tray(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 fn show_pet(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.state::<DesktopStore>().get()?.pet_hidden { return Ok(()); }
     ensure_tray(app)?;
     if let Some(window) = app.get_webview_window("desktop-pet") { let _ = window.unminimize(); return window.show().map_err(|e| e.to_string()); }
     let window = WebviewWindowBuilder::new(app, "desktop-pet", WebviewUrl::App("pet.html".into()))
@@ -248,12 +251,24 @@ fn show_pet(app: &tauri::AppHandle) -> Result<(), String> {
         .transparent(true).shadow(false).always_on_top(true).skip_taskbar(true).focused(false).visible(false)
         .build().map_err(|e| e.to_string())?;
     position_pet(&window, app.state::<DesktopStore>().get()?.pet_position)?;
-    let hide_window = window.clone();
-    window.on_window_event(move |event| { if let tauri::WindowEvent::CloseRequested { api, .. } = event { api.prevent_close(); let _ = hide_window.hide(); } });
+    if app.state::<DesktopStore>().get()?.pet_hidden { let _ = window.destroy(); return Ok(()); }
+    let pet_app = app.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let app = pet_app.clone();
+            std::thread::spawn(move || { if let Err(error) = hide_pet(&app) { eprintln!("{error}"); } });
+        }
+    });
     window.show().map_err(|e| e.to_string())
 }
 
 fn show_notes(app: &tauri::AppHandle) -> Result<(), String> {
+    ensure_tray(app)?;
+    if !app.state::<DesktopStore>().get()?.enabled {
+        let data = app.state::<DesktopStore>().update(|data| { data.enabled = true; data.pet_hidden = true; Ok(()) })?;
+        publish(app, &data);
+    }
     if let Some(window) = app.get_webview_window("desktop-notes") { let _ = window.unminimize(); return window.show().and_then(|_| window.set_focus()).map_err(|e| e.to_string()); }
     WebviewWindowBuilder::new(app, "desktop-notes", WebviewUrl::App("notes.html".into()))
         .title("MarkFlow 便签与待办").inner_size(420.0, 620.0).min_inner_size(360.0, 440.0)
@@ -266,10 +281,10 @@ pub async fn desktop_action(app: tauri::AppHandle, window: tauri::WebviewWindow,
     match action.as_str() {
         "pet-settings" => crate::pets::open_settings(&app),
         "pet" => enable_pet(&app),
+        "hide-pet" => hide_pet(&app),
         "enter" => {
             QUITTING.store(false, Ordering::Relaxed);
-            let data = app.state::<DesktopStore>().update(|data| { data.enabled = true; Ok(()) })?;
-            show_pet(&app)?; show_notes(&app)?; publish(&app, &data);
+            show_notes(&app)?;
             if window.label() == "main" || window.label().starts_with("document-") { window.hide().map_err(|e| e.to_string())?; }
             Ok(())
         }
@@ -289,8 +304,15 @@ pub async fn desktop_action(app: tauri::AppHandle, window: tauri::WebviewWindow,
 
 pub fn enable_pet(app: &tauri::AppHandle) -> Result<(), String> {
     QUITTING.store(false, Ordering::Relaxed);
-    let data = app.state::<DesktopStore>().update(|data| { data.enabled = true; Ok(()) })?;
+    let data = app.state::<DesktopStore>().update(|data| { data.enabled = true; data.pet_hidden = false; Ok(()) })?;
     show_pet(app)?; publish(app, &data); Ok(())
+}
+
+fn hide_pet(app: &tauri::AppHandle) -> Result<(), String> {
+    let data = app.state::<DesktopStore>().update(|data| { data.pet_hidden = true; Ok(()) })?;
+    publish(app, &data);
+    if let Some(window) = app.get_webview_window("desktop-pet") { window.destroy().map_err(|e| e.to_string())?; }
+    Ok(())
 }
 
 #[tauri::command]
@@ -299,7 +321,9 @@ pub fn desktop_save_position(app: tauri::AppHandle, x: i32, y: i32) -> Result<()
 }
 
 pub fn start(app: &tauri::AppHandle) {
-    if app.state::<DesktopStore>().get().is_ok_and(|d| d.enabled) { if let Err(error) = show_pet(app) { eprintln!("{error}"); } }
+    if app.state::<DesktopStore>().get().is_ok_and(|d| d.enabled) {
+        if let Err(error) = ensure_tray(app).and_then(|_| show_pet(app)) { eprintln!("{error}"); }
+    }
     let app = app.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(1));
@@ -315,6 +339,10 @@ pub fn start(app: &tauri::AppHandle) {
             }
         }
     });
+}
+
+pub fn keep_running(app: &tauri::AppHandle) -> bool {
+    !QUITTING.load(Ordering::Relaxed) && app.state::<DesktopStore>().get().is_ok_and(|data| data.enabled)
 }
 
 #[cfg(test)]
@@ -370,5 +398,18 @@ mod tests {
         let broken = DesktopStore::open(root.clone()); assert!(broken.update(|d| { d.enabled = true; Ok(()) }).is_err());
         assert_eq!(fs::read_to_string(root.join("desktop-notes.json")).unwrap(), "broken");
         drop(broken); fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn legacy_pet_visibility_and_closed_pet_reminders() {
+        let old: DesktopData = serde_json::from_str(r#"{"enabled":true,"notes":[],"todos":[],"alerts":[]}"#).unwrap();
+        assert!(!old.pet_hidden);
+        let mut data = scheduled();
+        data.pet_hidden = true;
+        let saved = serde_json::to_vec(&data).unwrap();
+        let mut restored: DesktopData = serde_json::from_slice(&saved).unwrap();
+        assert!(restored.pet_hidden);
+        assert!(collect_due(&mut restored, 1800000));
+        assert_eq!(restored.alerts.len(), 1);
+        assert!(restored.enabled);
     }
 }

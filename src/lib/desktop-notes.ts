@@ -3,8 +3,8 @@ import { invoke } from '@tauri-apps/api/core'
 export interface DesktopNote { id: string; text: string; color: string }
 export interface DesktopTodo { id: string; title: string; dueAt: number | null; remindBefore: number[]; done: boolean; snoozeUntil: number | null }
 export interface DesktopAlert { id: string; todoId: string; title: string; dueAt: number; triggerAt: number }
-export interface DesktopData { revision: number; enabled: boolean; notes: DesktopNote[]; todos: DesktopTodo[]; alerts: DesktopAlert[] }
-export const emptyDesktopData = (): DesktopData => ({ revision: 0, enabled: false, notes: [], todos: [], alerts: [] })
+export interface DesktopData { revision: number; enabled: boolean; petHidden: boolean; notes: DesktopNote[]; todos: DesktopTodo[]; alerts: DesktopAlert[] }
+export const emptyDesktopData = (): DesktopData => ({ revision: 0, enabled: false, petHidden: false, notes: [], todos: [], alerts: [] })
 export const desktopAction = (action: string) => invoke<void>('desktop_action', { action })
 export const getDesktopData = () => invoke<DesktopData>('desktop_get')
 export function localDateInput(timestamp: number): string {

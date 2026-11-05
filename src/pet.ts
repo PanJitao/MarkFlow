@@ -123,6 +123,7 @@ $('#speech-close').addEventListener('click', () => { if (state.alerts.length) vo
 $('#pet-menu-toggle').addEventListener('click', () => setMenu(menu.hidden))
 async function openNotes() { try { await desktopAction('notes') } catch (error) { say(String(error)) } }
 $('#pet-count').addEventListener('click', () => void openNotes())
+$('#pet-close').addEventListener('click', () => void desktopAction('hide-pet').catch(error => say(String(error))))
 $('#pet-open').addEventListener('click', event => {
   if (suppressClick || event.detail > 1) return
   if (sleeping) { setSleeping(false); say('我醒啦。清单里的事都还记着。', 'wake'); return }

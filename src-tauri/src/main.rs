@@ -1915,6 +1915,9 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("运行 MarkFlow 时出错")
         .run(|_app, _event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event {
+                if code.is_none() && desktop_notes::keep_running(_app) { api.prevent_exit(); }
+            }
             // Finder sends URLs, not argv, both at launch and while the app is running.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {

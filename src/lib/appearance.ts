@@ -20,6 +20,7 @@ export interface AppearanceSettings {
   wallpaperBlur: number
   wallpaperDim: number
   wallpaperPauseOnBlur: boolean
+  wallpaperPauseWhenHidden: boolean
   themeMode: ThemeMode
   backgroundColor: string
   backgroundOpacity: number
@@ -60,6 +61,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   wallpaperBlur: 12,
   wallpaperDim: 15,
   wallpaperPauseOnBlur: true,
+  wallpaperPauseWhenHidden: true,
   themeMode: 'system',
   backgroundColor: '#e7e7e7',
   backgroundOpacity: 100,
@@ -127,6 +129,7 @@ export function loadAppearanceSettings(): AppearanceSettings {
       wallpaperBlur: clamp(saved.wallpaperBlur, 0, 30, 12),
       wallpaperDim: clamp(saved.wallpaperDim, 0, 60, 15),
       wallpaperPauseOnBlur: typeof saved.wallpaperPauseOnBlur === 'boolean' ? saved.wallpaperPauseOnBlur : true,
+      wallpaperPauseWhenHidden: typeof saved.wallpaperPauseWhenHidden === 'boolean' ? saved.wallpaperPauseWhenHidden : true,
       themeMode: saved.themeMode === 'light' || saved.themeMode === 'dark' || saved.themeMode === 'system'
         ? saved.themeMode
         : DEFAULT_APPEARANCE.themeMode,

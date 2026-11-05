@@ -18,12 +18,36 @@ function message(value: string, error = false) { status.textContent = value; sta
 function receive(data: DesktopData) {
   if (data.revision < state.revision) return
   state = data; renderTodos(); renderNotes()
+  renderAlerts()
+  const petVisible = data.enabled && !data.petHidden
+  $('#notes-pet-toggle').textContent = petVisible ? '关闭宠物' : '显示宠物'
+  $('#notes-pet-toggle').setAttribute('aria-pressed', String(petVisible))
+  $('#notes-reminder-status').textContent = petVisible ? '宠物气泡提醒已开启' : '提醒在此查看'
   $('#todo-count').textContent = String(data.todos.filter(t => !t.done).length); $('#note-count').textContent = String(data.notes.length)
 }
 async function mutate(command: string, args: Record<string, unknown>) {
   const data = await invoke<DesktopData>(command, args); receive(data); return data
 }
 function guarded(operation: () => Promise<unknown>) { void operation().catch(error => message(String(error), true)) }
+function renderAlerts() {
+  const container = $('#notes-alerts')
+  container.hidden = state.alerts.length === 0
+  container.replaceChildren(...state.alerts.map(alert => {
+    const item = document.createElement('article'), title = document.createElement('strong'), when = document.createElement('small'), controls = document.createElement('div')
+    title.textContent = alert.title; when.textContent = `到期 ${dueLabel(alert.dueAt)}`
+    controls.className = 'notes-alert-actions'
+    for (const [action, label] of [['done', '完成'], ['snooze', '10 分钟后'], ['dismiss', '知道了']]) {
+      const button = document.createElement('button'); button.textContent = label
+      button.addEventListener('click', () => guarded(async () => {
+        button.disabled = true
+        try { await mutate('desktop_resolve_alert', { id: alert.id, action }) }
+        finally { button.disabled = false }
+      }))
+      controls.append(button)
+    }
+    item.append(title, when, controls); return item
+  }))
+}
 function deleteButton(label: string, remove: () => Promise<unknown>) {
   const button = document.createElement('button'); button.innerHTML = trashIcon; button.title = label; button.setAttribute('aria-label', label)
   button.addEventListener('click', () => {
@@ -137,6 +161,13 @@ document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(button => but
   document.querySelectorAll('[data-tab]').forEach(tab => tab.setAttribute('aria-selected', String(tab === button)))
 }))
 $('#back-editor').addEventListener('click', () => guarded(async () => { await flushNotes(); await desktopAction('editor') }))
+$('#notes-pet-toggle').addEventListener('click', () => guarded(async () => {
+  const button = $<HTMLButtonElement>('#notes-pet-toggle'); button.disabled = true
+  try {
+    await desktopAction(state.enabled && !state.petHidden ? 'hide-pet' : 'pet')
+    receive(await getDesktopData())
+  } finally { button.disabled = false }
+}))
 $('#notes-close').addEventListener('click', () => guarded(() => currentWindow.close()))
 let closing = false
 void currentWindow.onCloseRequested(async event => {

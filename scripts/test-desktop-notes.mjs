@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom'
 
 const clone = value => JSON.parse(JSON.stringify(value))
 const tick = () => new Promise(resolve => setTimeout(resolve, 10))
-const empty = () => ({ revision: 0, enabled: true, notes: [], todos: [], alerts: [] })
+const empty = () => ({ revision: 0, enabled: true, petHidden: false, notes: [], todos: [], alerts: [] })
 async function setup(entry, initial = empty(), draft) {
   const bundle = await build({ entryPoints: [`src/${entry}.ts`], bundle: true, write: false, format: 'iife', loader: { '.css': 'empty' }, plugins: [{
     name: 'native-test', setup(builder) {
@@ -38,6 +38,7 @@ async function setup(entry, initial = empty(), draft) {
     }
     if (command === 'desktop_save_todo') state.todos.push({ ...args.input, id: 'saved', done: false, snoozeUntil: null })
     if (command === 'desktop_resolve_alert') state.alerts = state.alerts.filter(a => a.id !== args.id)
+    if (command === 'desktop_action' && ['pet', 'hide-pet'].includes(args.action)) state.petHidden = args.action === 'hide-pet'
     if (command !== 'desktop_get') state.revision++
     return clone(state)
   }
@@ -81,6 +82,16 @@ assert.equal(quickClose.data().notes[0].text, '关闭保存期间的最后输入
 quickClose.dom.window.close()
 
 const alerts = [1, 2].map(n => ({ id: `alert-${n}`, todoId: `todo-${n}`, title: `<提醒 ${n}>`, dueAt: Date.now() + 900000, triggerAt: Date.now() }))
+const independentNotes = await setup('notes', { ...empty(), petHidden: true, alerts: clone(alerts) })
+assert.equal(independentNotes.$('#notes-pet-toggle').textContent, '显示宠物')
+assert.equal(independentNotes.$('#notes-alerts').hidden, false, 'reminders remain visible in notes while the pet is closed')
+assert.equal(independentNotes.$('#notes-alerts strong').textContent, '<提醒 1>')
+independentNotes.$('#notes-alerts button').click(); await tick()
+assert.equal(independentNotes.data().alerts.length, 1)
+independentNotes.$('#notes-pet-toggle').click(); await tick()
+assert.equal(independentNotes.calls.find(call => call.command === 'desktop_action').args.action, 'pet')
+assert.equal(independentNotes.$('#notes-pet-toggle').textContent, '关闭宠物')
+independentNotes.dom.window.close()
 const pet = await setup('pet', { ...empty(), revision: 3, alerts })
 assert.equal(pet.$('#speech-text').textContent, '<提醒 1>')
 assert.equal(pet.$('#speech-text').children.length, 0, 'titles render as text')
@@ -116,5 +127,7 @@ pet.receive({ ...empty(), revision:31 }); await new Promise(resolve=>setTimeout(
 assert.equal(pet.$('#speech-text').textContent, 'AI 的问候', 'queued AI speech runs after reminders are cleared')
 pet.w.testPetCommand({payload:{id:'expired',text:'已过期',expiresAt:Date.now()-1}})
 assert.equal(pet.$('#speech-text').textContent, 'AI 的问候')
+pet.$('#pet-close').click(); await tick()
+assert.equal(pet.calls.at(-1).args.action, 'hide-pet', 'close control shuts the pet without leaving notes mode')
 pet.dom.window.close()
 console.log('Desktop notes: draft recovery, custom reminders, save-on-close race, bubble queue and stale-event checks passed.')

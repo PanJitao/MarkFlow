@@ -23,6 +23,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .pet-controls { display: flex; justify-content: center; gap: 4px; width: max-content; margin: -3px auto 0; position: relative; }
 .pet-controls button { background: #f9fbfdef; border-color: #d2dbe5; border-radius: 10px; font-size: 10px; padding: 3px 7px; }
 #pet-menu-toggle { font-size: 14px; padding: 0 7px; }
+#pet-close { font-size: 14px; padding: 0 7px; }
+#pet-close:hover { background: #f5dddd; color: #a33b3b; }
 .pet-stage.is-tapped { animation: pet-tap .36s ease-out; transform-origin: 50% 90%; }
 @keyframes pet-tap { 30% { transform: scale(calc(var(--pet-flip, 1) * .97), 1.025); } 65% { transform: scale(calc(var(--pet-flip, 1) * 1.015), .985); } }
 .pet-speech { position: absolute; bottom: 270px; left: 24px; right: 24px; padding: 10px 12px; border-radius: 10px; background: var(--pet-bubble-color, #fcfdff); color: var(--pet-bubble-text, #283343); border: 1px solid #cbd6e0; box-shadow: 0 2px 6px #12243a14; }
@@ -93,6 +95,12 @@ input[type=checkbox] { accent-color: #527b91; }
 #notes-status { flex: 1; overflow-wrap: anywhere; }
 #notes-status.error { color: #a35f51; }
 .running-label { white-space: nowrap; }
+.notes-alerts { display: grid; gap: 8px; margin-bottom: 12px; }
+.notes-alerts article { display: grid; gap: 6px; padding: 10px; border: 1px solid #d4dfe5; border-left: 3px solid #426b82; border-radius: 4px; background: #fff; }
+.notes-alerts strong { font-size: 13px; overflow-wrap: anywhere; }
+.notes-alerts small { color: #75808c; }
+.notes-alert-actions { display: flex; gap: 6px; }
+.notes-alert-actions button { padding: 4px 8px; font-size: 11px; }
 .running-label i { display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: #80a896; }
 #retry-notes { padding: 2px 5px; font-size: 10px; }
 @media (prefers-reduced-motion: reduce) { .pet *, .pet[data-action] * { animation: none !important; } }

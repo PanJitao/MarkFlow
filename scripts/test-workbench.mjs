@@ -180,6 +180,21 @@ for (const platform of ['Win32', 'MacIntel']) {
   $('[data-file="export-pdf"]').click()
   await new Promise((resolve) => setTimeout(resolve, 60))
   check(printed.includes('最新打印内容'), `${platform}: PDF prints latest preview`)
+
+  // jsdom has no layout. In a 1000px workspace a 230px tree leaves a 425px editor at 54%.
+  const workspace = $('#workspace')
+  workspace.classList.remove('file-tree-hidden')
+  workspace.style.setProperty('--split', '54%')
+  workspace.style.setProperty('--tree-editor-offset', '115px')
+  workspace.getBoundingClientRect = () => new w.DOMRect(0, 0, 1000, 600)
+  $('#editor-panel').getBoundingClientRect = () => new w.DOMRect(231, 0, 425, 600)
+  $('#splitter').dispatchEvent(new w.MouseEvent('mousedown', { clientX: 659, clientY: 300 }))
+  w.dispatchEvent(new w.MouseEvent('mousemove', { clientX: 659, clientY: 308 }))
+  check(workspace.style.getPropertyValue('--split') === '54%', `${platform}: vertical movement keeps the divider in place`)
+  w.dispatchEvent(new w.MouseEvent('mousemove', { clientX: 674, clientY: 308 }))
+  w.dispatchEvent(new w.MouseEvent('mouseup', { clientX: 674, clientY: 308 }))
+  check(Math.abs(parseFloat(w.localStorage.getItem('exchangemd:split')) - 55.5) < 0.001, `${platform}: dragging 15px moves the divider by 15px and saves its position`)
+
   check(errors.length === 0, `${platform}: no application exceptions: ${errors.join('; ')}`)
   dom.window.close()
   console.log(`✓ ${platform} editing, search, commands, IME, history, save/open`)

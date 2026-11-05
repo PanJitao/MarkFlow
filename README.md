@@ -8,7 +8,7 @@
 
 Markdown、Word、Excel、HTML、PDF 的转换、编辑、预览和文件夹管理都在一个桌面应用中完成。
 
-[![Version](https://img.shields.io/badge/version-0.4.5-1f7a8c.svg)](https://github.com/PanJitao/MarkFlow/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.4.6-1f7a8c.svg)](https://github.com/PanJitao/MarkFlow/releases/latest)
 ![Tauri](https://img.shields.io/badge/desktop-Tauri%20v2-24c8db.svg)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3a6ea5.svg)
 [![License](https://img.shields.io/badge/license-MIT-4c956c.svg)](LICENSE)
@@ -23,7 +23,7 @@ Markdown、Word、Excel、HTML、PDF 的转换、编辑、预览和文件夹管�
 
 MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown 源码编辑与实时预览，支持 Word、Excel 导入为 Markdown，并将 Markdown 导出为 Word、HTML 或 PDF。打开文件夹后，可在左侧文件树中浏览 Markdown 和图片资源。
 
-当前源码版本为 `0.4.5`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
+当前源码版本为 `0.4.6`。转换、预览、外观设置和文件夹操作均在本机完成，文档不会上传到服务端。
 
 ## 截图
 
@@ -76,13 +76,13 @@ MarkFlow 面向日常写作、文档整理和格式转换。它提供 Markdown �
 
 ### 桌面宠物、便签与待办
 
-- 点击顶部“便签模式”，或在命令面板搜索“进入桌面便签模式”。编辑器收起，桌面显示蓝发 Q 版角色与便签面板。
-- 内置蓝发角色采用 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的 15 段透明动画素材，项目作者为 [PC2005-cloud](https://github.com/PC2005-cloud)。采用 MIT 许可，保留 `Copyright (c) 2026 PC2005-cloud`；原始许可、素材来源与版本随安装包保留。待机时自然衔接呼吸、张望和日常小动作；单击互动，双击或点击下方“便签”打开面板，拖动移动位置，右键或“···”选择动作。
+- 点击编辑器右上角“便签”在独立窗口打开便签与待办。文件菜单、设置和命令面板同时提供“在新窗口打开”与“切换到便签模式”，后者会收起当前编辑器。
+- 内置“蓝色大肥鱼”采用 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的 15 段透明动画素材，项目作者为 [PC2005-cloud](https://github.com/PC2005-cloud)。依据[上游声明](https://github.com/PC2005-cloud/dsh-pet#许可)，代码为 MIT，动画素材限非商业用途，形象为 CC BY-NC-SA 4.0。原型“溟月”署名 [上善无形](https://space.bilibili.com/4456176)，DeepSeek 版设计署名 [ZipZipPipe](https://space.bilibili.com/4168597)。原始许可、来源和转换记录随安装包保留。单击互动，双击或点击下方“便签”打开面板，拖动移动位置，右键或“···”选择动作。
 - 动作菜单可挥手、伸懒腰、玩魔方和睡觉；拖动时播放悬空动作，完成待办时播放庆祝。睡觉不会屏蔽待办，到点会唤醒并提醒。气泡话语为内置提示。
 - 便签自动保存，支持米白、薄荷、淡粉、浅紫四种颜色。待办可设置本地日期和时间，并多选准时、提前 15 / 30 / 60 分钟或自定义分钟数。
 - 提醒以宠物气泡显示，可直接完成、延后 10 分钟、收起或切换其他提醒。关闭编辑器与便签面板后，宠物和提醒仍继续运行；系统托盘可重新打开窗口。
-- 从宠物菜单选择“退出软件”会保存内容并结束程序；完全退出或关机期间无法实时提醒，下次启动会合并补发错过的提醒。未提交的待办表单保留为草稿。
-- “关闭便签模式”停止宠物提醒并返回编辑器，不删除便签和待办。启用状态、待办、便签、提醒记录和宠物位置保存在应用数据目录的 `desktop-notes.json`；仅一个 MarkFlow 进程负责该数据和提醒。
+- 从宠物或系统托盘菜单选择“退出软件”会保存内容并结束程序；完全退出或关机期间无法实时提醒，下次启动会合并补发错过的提醒。未提交的待办表单保留为草稿。
+- 宠物旁的关闭按钮、便签窗口、文件菜单、设置和托盘均可关闭宠物，关闭状态会保存。便签与待办继续可用，到时提醒在便签窗口查看；可从原入口重新显示宠物。便签、待办、提醒记录和宠物状态保存在应用数据目录的 `desktop-notes.json`，仅一个进程负责这些数据。
 - Windows 使用原始 VP9-alpha WebM，macOS WKWebView 使用保留透明通道的动画 WebP，避免 VP9 解码丢失透明度；切换动作时，下一段就绪后才移除上一段。系统开启“减少动态效果”时显示静态角色。
 - 安装包按目标平台只携带一套内置动画：Windows 不再打入约 59.61 MB 的 Mac WebP，Mac 不再打入 WebM；15 个动作与授权文件均保留。Windows 视频无法解码时回退到静态封面。自定义宠物包仍支持两种格式。`npm run test:pet-bundle` 可检查构建产物的素材引用与体积。
 - Windows 已进行桌面实测；macOS 已适配透明窗口和平台字体，仍需 Mac 真机验证。透明宠物使用 Tauri 的 macOS private API 配置，面向直接安装包分发。素材可用 `node scripts/prepare-pet-assets.mjs <dsh-pet 仓库路径>` 重新准备（需要 FFmpeg）。
@@ -161,6 +161,8 @@ Windows 10/11 通常已内置 WebView2。少数旧系统如缺少该运行时，
 
 自动保存可在设置中独立配置 3–10 秒循环，并可按需启用窗口失焦和切换文件前保存。底部状态栏会显示当前策略及“已保存 / 未保存 / 保存中”状态。
 
+应用启动时会自动检查正式发布渠道，也可在“设置 → 应用更新”或命令面板手动检查。发现新版本后，确认下载与安装。0.4.6 正式版可供 0.4.5 和 0.4.6-beta.1 / beta.2 升级。
+
 ## 自行构建
 
 ### 环境要求
@@ -204,7 +206,7 @@ npm run tauri -- build --bundles nsis
 Windows NSIS 安装程序输出至：
 
 ```text
-src-tauri/target/release/bundle/nsis/MarkFlow_0.4.5_x64-setup.exe
+src-tauri/target/release/bundle/nsis/MarkFlow_0.4.6_x64-setup.exe
 ```
 
 ## 项目结构
@@ -244,7 +246,7 @@ src-tauri/target/release/bundle/nsis/MarkFlow_0.4.5_x64-setup.exe
 - 唯一入口为「设置 → 主题与外观 → 选择壁纸与调节参数」。自动发现 Steam 主库及其他磁盘的库，也可选择 Wallpaper Engine 安装目录、`431960` 创意工坊目录、单个项目或本地媒体目录；递归发现嵌套项目并去重。
 - 支持图片和 MP4 / WebM / M4V 视频；通过 WebWallGL 3.0 加载场景（包括 scene.pkg）和网页壁纸。按名称搜索、类型筛选；应用程序壁纸保留在列表中并显示不可用原因，不执行 EXE，也不会把封面当作完整壁纸。
 - 依据各项目 `general.properties` 动态生成开关、滑块和数值、颜色与 HEX、下拉选项、文本输入及分组，读取排序、步长和条件显示。参数可搜索、实时修改、按项目保存和恢复默认，重启后恢复。文件、目录和场景纹理替换目前只读；复杂脚本、特效、依赖远程资源的网页、系统音频及媒体信息接口并非全部兼容。
-- 提供清晰、柔和、通透三种面板预设；「主题与外观」中可调整透明度、模糊、暗化和视频暂停。默认窗口失焦或隐藏时暂停视频。
+- 提供清晰、柔和、通透三种面板预设；“主题与外观”可调整透明度、模糊、暗化和手动暂停。可分别选择窗口失焦、最小化或隐藏后继续播放或暂停，偏好会保存，手动暂停优先。
 - 桌面版保存原媒体路径，不复制整个视频；重启后恢复背景。原文件移动或被 Steam 清理后，需要重新选择。视频能否解码取决于系统 WebView，优先使用 H.264 MP4。
 - 本地上传与壁纸库共用唯一的当前背景：最后一次成功选择覆盖旧背景，清除旧上传 Blob、媒体 URL、播放器和选中状态，不删除磁盘原文件。先校验图片/视频能否加载，再保存并替换；加载或保存失败保留原背景。新选择或清除会取消尚未完成的旧加载，重启仅恢复最后保存的背景。
 - 仅编辑器界面使用壁纸，导出文档不携带壁纸。本功能不启动 Wallpaper Engine；网页/场景脚本运行在隔离的 iframe 中，不具有编辑器 IPC 和存储访问权，资源访问限于已选项目目录。

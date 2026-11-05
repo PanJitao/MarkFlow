@@ -1945,8 +1945,12 @@ body { padding: 0; background: var(--bg); }
 .statusbar { gap: 12px; font-size: 12px; }
 .status-right { flex-shrink: 0; gap: 16px; }
 #status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#command-palette-btn { order: 2; margin: 0 auto; width: clamp(200px, 30vw, 440px); min-height: 26px; padding: 0 8px; border: 1px solid var(--line-clean); background: var(--surface-soft-panel); color: var(--text-muted); font-size: 12px; }
+.topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; padding-inline: 8px; }
+.topbar > .actions { grid-column: 1; order: 0; justify-self: start; }
+.topbar > .topbar-end { position: static; grid-column: 3; width: auto; padding: 0; justify-self: end; }
+#command-palette-btn { grid-column: 2; order: 0; margin: 0; width: clamp(200px, 30vw, 440px); min-height: 26px; padding: 0 8px; border: 1px solid var(--line-clean); background: var(--surface-soft-panel); color: var(--text-muted); font-size: 12px; }
 #command-palette-btn > span { flex: 1; text-align: left; }
+#update-check-status { display: block; white-space: normal; overflow-wrap: anywhere; }
 kbd { margin-left: auto; font: 11px var(--font-ui); color: var(--text-muted); white-space: nowrap; }
 .file-menu button { justify-content: space-between; gap: 24px; min-height: 28px; }
 .find-widget { position: absolute; z-index: 40; top: 35px; right: 8px; max-width: calc(100% - 16px); width: 430px; padding: 6px; background: var(--surface-raised-clean); border: 1px solid var(--line-clean); border-radius: 3px; box-shadow: var(--shadow-soft-clean); }
@@ -1976,7 +1980,9 @@ kbd { margin-left: auto; font: 11px var(--font-ui); color: var(--text-muted); wh
   .toolbar button:not(.icon-btn) { font-size: 0; width: 28px; min-width: 28px; }
 }
 @media (max-width: 760px) {
-  #command-palette-btn { width: auto; min-width: 28px; margin-left: auto; margin-right: 4px; }
+  .topbar { grid-template-columns: minmax(0, 1fr) 28px auto; }
+  #command-palette-btn { width: 28px; min-width: 28px; margin: 0; }
+  #desktop-notes-btn > span { display: none; }
   #command-palette-btn > span, #command-palette-btn kbd { display: none; }
   .status-right { gap: 8px; }
   .status-right > span:nth-child(2) { display: none; }

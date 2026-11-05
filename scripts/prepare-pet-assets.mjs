@@ -22,7 +22,7 @@ await mkdir(destination, { recursive: true })
 const manifest = {
   source: 'https://github.com/PC2005-cloud/dsh-pet',
   commit: run('git', ['rev-parse', 'HEAD'], reference),
-  license: 'MIT', copyright: 'Copyright (c) 2026 PC2005-cloud',
+  license: '形象 CC BY-NC-SA 4.0；动画素材仅非商业使用', copyright: 'Copyright (c) 2026 PC2005-cloud',
   clips: {},
 }
 for (const [id, name] of Object.entries(selected)) {
@@ -42,5 +42,5 @@ for (const [id, name] of Object.entries(selected)) {
 run('ffmpeg', ['-v', 'error', '-c:v', 'libvpx-vp9', '-i', join(destination, 'idle.webm'), '-frames:v', '1', '-y', join(destination, 'poster.png')])
 await copyFile(join(reference, 'LICENSE'), join(destination, 'LICENSE.txt'))
 await writeFile(join(destination, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
-await writeFile(join(destination, 'NOTICE.txt'), `Blue-haired character animation assets from dsh-pet.\n${manifest.source}\nCommit: ${manifest.commit}\n${manifest.copyright}\nLicensed under the MIT License (see LICENSE.txt).\nOriginal VP9-alpha WebM files are unchanged; WebP and PNG variants are format conversions made for MarkFlow.\n`)
+await writeFile(join(destination, 'NOTICE.txt'), `Blue Fish character animation assets from dsh-pet.\n${manifest.source}\nCommit: ${manifest.commit}\n${manifest.copyright}\nThe upstream code is MIT licensed (the original LICENSE.txt is retained).\nAccording to the upstream README, animation, prompt and source-video materials are for non-commercial use; the character is under CC BY-NC-SA 4.0.\nUpstream license and attribution: ${manifest.source}#许可\nCharacter prototype Mingyue: 上善无形 https://space.bilibili.com/4456176\nDeepSeek adaptation design: ZipZipPipe https://space.bilibili.com/4168597\nCharacter license: https://creativecommons.org/licenses/by-nc-sa/4.0/\nOriginal VP9-alpha WebM files are unchanged; WebP and PNG variants are format conversions made for MarkFlow.\n`)
 await import('./create-builtin-pet.mjs')
